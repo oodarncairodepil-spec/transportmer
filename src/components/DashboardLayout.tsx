@@ -1,39 +1,52 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import {
   LayoutDashboard, Truck, Users, MapPin, ClipboardList,
   Wrench, Calendar, BarChart3, Bell, ChevronLeft, ChevronRight,
-  Moon, Sun, Search
+  Moon, Sun, Search, UserPlus, LogOut
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { alerts } from "@/data/mockData";
-
-const navItems = [
-  { label: "Dashboard", icon: LayoutDashboard, path: "/" },
-  { label: "Fleet", icon: Truck, path: "/fleet" },
-  { label: "Drivers", icon: Users, path: "/drivers" },
-  { label: "Routes", icon: MapPin, path: "/routes" },
-  { label: "Work Orders", icon: ClipboardList, path: "/work-orders" },
-  { label: "Maintenance", icon: Wrench, path: "/maintenance" },
-  { label: "Scheduling", icon: Calendar, path: "/scheduling" },
-  { label: "Reports", icon: BarChart3, path: "/reports" },
-];
+import { useAuth } from "@/components/AuthProvider";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const location = useLocation();
   const [collapsed, setCollapsed] = useState(false);
-  const [darkMode, setDarkMode] = useState(true);
+  const [darkMode, setDarkMode] = useState(false);
   const [showAlerts, setShowAlerts] = useState(false);
+  const { user, role, signOut } = useAuth();
+
+  const navItems = [
+    { label: "Dashboard", icon: LayoutDashboard, path: "/" },
+    { label: "Fleet", icon: Truck, path: "/fleet" },
+    { label: "Drivers", icon: Users, path: "/drivers" },
+    { label: "Routes", icon: MapPin, path: "/routes" },
+    { label: "Work Orders", icon: ClipboardList, path: "/work-orders" },
+    { label: "Maintenance", icon: Wrench, path: "/maintenance" },
+    { label: "Scheduling", icon: Calendar, path: "/scheduling" },
+    { label: "Reports", icon: BarChart3, path: "/reports" },
+    ...(role === "admin" ? [{ label: "Staff", icon: UserPlus, path: "/admin/staff" }] : []),
+  ];
 
   const toggleDarkMode = () => {
-    setDarkMode(!darkMode);
-    document.documentElement.classList.toggle("dark");
+    setDarkMode((prev) => {
+      const next = !prev;
+      document.documentElement.classList.toggle("dark", next);
+      return next;
+    });
   };
 
-  // Set dark mode on mount
-  useState(() => {
-    document.documentElement.classList.add("dark");
-  });
+  useEffect(() => {
+    document.documentElement.classList.remove("dark");
+  }, []);
 
   const highAlerts = alerts.filter(a => a.severity === 'high').length;
 
@@ -151,9 +164,28 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                 </div>
               )}
             </div>
-            <div className="w-8 h-8 rounded-full gradient-primary flex items-center justify-center text-xs font-bold text-primary-foreground">
-              AD
-            </div>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button
+                  type="button"
+                  className="w-8 h-8 rounded-full gradient-primary flex items-center justify-center text-xs font-bold text-primary-foreground"
+                  aria-label="Open user menu"
+                >
+                  {(user?.email?.[0] || "U").toUpperCase()}
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-56">
+                <DropdownMenuLabel className="space-y-1">
+                  <div className="truncate">{user?.email ?? "User"}</div>
+                  <div className="text-xs font-normal text-muted-foreground">{role ? `Role: ${role}` : "Role: unknown"}</div>
+                </DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={() => void signOut()}>
+                  <LogOut className="w-4 h-4" />
+                  Sign out
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
         </header>
 

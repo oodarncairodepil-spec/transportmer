@@ -3,6 +3,8 @@ import "dotenv/config";
 import cors from "cors";
 import express from "express";
 import { z } from "zod";
+import { createClient } from "@supabase/supabase-js";
+import { generateTempPassword } from "./lib/tempPassword";
 
 import { fetchGoogleDirections } from "./routeFetcher/googleDirections";
 import { fetchOsrmFallback } from "./routeFetcher/osrmFallback";
@@ -14,6 +16,101 @@ import { getSupabaseClient } from "./supabase/client";
 const app = express();
 app.use(cors());
 app.use(express.json({ limit: "2mb" }));
+
+function getSupabaseUrl() {
+  return String(process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || "").trim();
+}
+
+function getSupabaseAnonKey() {
+  return String(process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY || "").trim();
+}
+
+function getSupabaseServiceRoleKey() {
+  return process.env.SUPABASE_SERVICE_ROLE_KEY || "";
+}
+
+function getBearerToken(req: express.Request) {
+  const header = String(req.header("authorization") || "").trim();
+  if (!header.toLowerCase().startsWith("bearer ")) {
+    return null;
+  }
+  const token = header.slice("bearer ".length).trim();
+  return token.length > 0 ? token : null;
+}
+
+async function requireUser(req: express.Request) {
+  const url = getSupabaseUrl();
+  const anonKey = getSupabaseAnonKey();
+  const token = getBearerToken(req);
+  if (!token) {
+    return { ok: false as const, status: 401 as const, error: "Missing bearer token" };
+  }
+  if (!url || !anonKey) {
+    return { ok: false as const, status: 500 as const, error: "Supabase env not configured" };
+  }
+
+  const supabase = createClient(url, anonKey, { auth: { persistSession: false, autoRefreshToken: false } });
+  const { data, error } = await supabase.auth.getUser(token);
+  if (error || !data.user) {
+    return {
+      ok: false as const,
+      status: 401 as const,
+      error: error?.message ? `Invalid auth token: ${error.message}` : "Invalid auth token",
+    };
+  }
+  return { ok: true as const, user: data.user, token };
+}
+
+async function requireAdmin(user: { id: string; app_metadata?: Record<string, unknown> }) {
+  const role = String((user.app_metadata as any)?.role || "").trim().toLowerCase();
+  if (role === "admin") {
+    return { ok: true as const };
+  }
+
+  const url = getSupabaseUrl();
+  const serviceRole = getSupabaseServiceRoleKey();
+  if (!url || !serviceRole) {
+    return { ok: false as const, error: "Forbidden" };
+  }
+
+  const supabaseAdmin = createClient(url, serviceRole, { auth: { persistSession: false, autoRefreshToken: false } });
+  const { data, error } = await supabaseAdmin.from("staff_profiles").select("role,email,name").eq("user_id", user.id).maybeSingle();
+  if (!error) {
+    const profileRole = String((data as any)?.role ?? "").trim().toLowerCase();
+    if (profileRole === "admin") {
+      return { ok: true as const };
+    }
+  }
+
+  const { count, error: countErr } = await supabaseAdmin
+    .from("staff_profiles")
+    .select("user_id", { count: "exact", head: true })
+    .eq("role", "admin");
+  if (!countErr && (count ?? 0) === 0) {
+    const email = (user as any).email as string | undefined;
+    const name = String(((user as any).user_metadata as any)?.name ?? email ?? "Admin");
+    const upsertErr = await supabaseAdmin
+      .from("staff_profiles")
+      .upsert(
+        {
+          user_id: user.id,
+          email: email ?? `${user.id}@local`,
+          name,
+          role: "admin",
+          must_change_password: false,
+          created_by_user_id: user.id,
+        },
+        { onConflict: "user_id" },
+      )
+      .then((r) => r.error);
+    if (!upsertErr) {
+      return { ok: true as const };
+    }
+  }
+
+  return { ok: false as const, error: "Forbidden" };
+}
+
 
 const INDONESIA_BBOX = {
   minLng: 95.0,
@@ -89,7 +186,7 @@ const requestSchema = z.object({
 app.post("/api/truck-route", async (req, res) => {
   try {
     const parsed = requestSchema.parse(req.body);
-    const googleKey = process.env.GOOGLE_DIRECTIONS_API_KEY || process.env.GOOGLE_MAPS_API_KEY;
+    const googleKey = process.env.GOOGLE_API_KEY || process.env.GOOGLE_MAPS_API_KEY;
     const overpassUrl = process.env.OVERPASS_URL || "https://overpass-api.de/api/interpreter";
 
     let candidates: Array<{
@@ -220,6 +317,221 @@ app.post("/api/truck-route", async (req, res) => {
   }
 });
 
+app.get("/api/me", async (req, res) => {
+  const auth = await requireUser(req);
+  if (!auth.ok) {
+    return res.status(auth.status).json({ error: auth.error });
+  }
+
+  const url = getSupabaseUrl();
+  const anonKey = getSupabaseAnonKey();
+  if (!url || !anonKey) {
+    return res.status(500).json({ error: "Supabase env not configured" });
+  }
+
+  const supabase = createClient(url, anonKey, {
+    auth: { persistSession: false, autoRefreshToken: false },
+    global: { headers: { Authorization: `Bearer ${auth.token}` } },
+  });
+
+  const { data, error } = await supabase
+    .from("staff_profiles")
+    .select("user_id,email,name,phone,title,role,must_change_password,created_at")
+    .eq("user_id", auth.user.id)
+    .maybeSingle();
+
+  if (error) {
+    return res.status(200).json({
+      user: { id: auth.user.id, email: auth.user.email },
+      profile: null,
+      profileError: error.message,
+    });
+  }
+
+  return res.status(200).json({
+    user: { id: auth.user.id, email: auth.user.email },
+    profile: data,
+  });
+});
+
+app.post("/api/auth/update-password", async (req, res) => {
+  const auth = await requireUser(req);
+  if (!auth.ok) {
+    return res.status(auth.status).json({ error: auth.error });
+  }
+
+  const bodySchema = z.object({ newPassword: z.string().min(8).max(128) });
+  let parsed: z.infer<typeof bodySchema>;
+  try {
+    parsed = bodySchema.parse(req.body);
+  } catch (e) {
+    const message = e instanceof Error ? e.message : "Invalid request";
+    return res.status(400).json({ error: message });
+  }
+
+  const url = getSupabaseUrl();
+  const serviceRole = getSupabaseServiceRoleKey();
+  if (!url || !serviceRole) {
+    return res.status(500).json({ error: "Supabase env not configured" });
+  }
+
+  const supabaseAdmin = createClient(url, serviceRole, { auth: { persistSession: false, autoRefreshToken: false } });
+  const { error: pwErr } = await supabaseAdmin.auth.admin.updateUserById(auth.user.id, { password: parsed.newPassword } as any);
+  if (pwErr) {
+    return res.status(400).json({ error: pwErr.message });
+  }
+
+  const { error: profileErr } = await supabaseAdmin
+    .from("staff_profiles")
+    .update({ must_change_password: false })
+    .eq("user_id", auth.user.id);
+  if (profileErr) {
+    return res.status(200).json({ ok: true, profileUpdated: false, profileError: profileErr.message });
+  }
+
+  return res.status(200).json({ ok: true });
+});
+
+app.get("/api/staff", async (req, res) => {
+  const auth = await requireUser(req);
+  if (!auth.ok) {
+    return res.status(auth.status).json({ error: auth.error });
+  }
+
+  const admin = await requireAdmin(auth.user);
+  if (!admin.ok) {
+    return res.status(admin.error === "Forbidden" ? 403 : 500).json({ error: admin.error });
+  }
+
+  const url = getSupabaseUrl();
+  const serviceRole = getSupabaseServiceRoleKey();
+  if (!url || !serviceRole) {
+    return res.status(500).json({ error: "Supabase env not configured" });
+  }
+  const supabaseAdmin = createClient(url, serviceRole, { auth: { persistSession: false, autoRefreshToken: false } });
+
+  const { data, error } = await supabaseAdmin
+    .from("staff_profiles")
+    .select("user_id,email,name,phone,title,role,must_change_password,created_at")
+    .order("created_at", { ascending: false });
+  if (error) {
+    return res.status(500).json({ error: error.message });
+  }
+  return res.status(200).json({ staff: data ?? [] });
+});
+
+app.post("/api/staff/create", async (req, res) => {
+  const auth = await requireUser(req);
+  if (!auth.ok) {
+    return res.status(auth.status).json({ error: auth.error });
+  }
+
+  const admin = await requireAdmin(auth.user);
+  if (!admin.ok) {
+    return res.status(admin.error === "Forbidden" ? 403 : 500).json({ error: admin.error });
+  }
+
+  const bodySchema = z.object({
+    email: z.string().email(),
+    name: z.string().min(1).max(120),
+    role: z.enum(["admin", "staff"]).optional().default("staff"),
+    phone: z.string().max(60).optional(),
+    title: z.string().max(80).optional(),
+  });
+  let parsed: z.infer<typeof bodySchema>;
+  try {
+    parsed = bodySchema.parse(req.body);
+  } catch (e) {
+    const message = e instanceof Error ? e.message : "Invalid request";
+    return res.status(400).json({ error: message });
+  }
+
+  const url = getSupabaseUrl();
+  const serviceRole = getSupabaseServiceRoleKey();
+  if (!url || !serviceRole) {
+    return res.status(500).json({ error: "Supabase env not configured" });
+  }
+
+  const tempPassword = generateTempPassword();
+  const supabaseAdmin = createClient(url, serviceRole, { auth: { persistSession: false, autoRefreshToken: false } });
+
+  const { data: created, error: createErr } = await supabaseAdmin.auth.admin.createUser({
+    email: parsed.email,
+    password: tempPassword,
+    email_confirm: true,
+    user_metadata: { name: parsed.name },
+    app_metadata: { role: parsed.role },
+  } as any);
+  if (createErr || !created.user) {
+    return res.status(400).json({ error: createErr?.message || "Failed to create user" });
+  }
+
+  const { error: insertErr } = await supabaseAdmin.from("staff_profiles").insert({
+    user_id: created.user.id,
+    email: parsed.email,
+    name: parsed.name,
+    phone: parsed.phone ?? null,
+    title: parsed.title ?? null,
+    role: parsed.role,
+    must_change_password: true,
+    created_by_user_id: auth.user.id,
+  });
+  if (insertErr) {
+    return res.status(400).json({ error: insertErr.message });
+  }
+
+  return res.status(200).json({ userId: created.user.id, tempPassword });
+});
+
+app.post("/api/staff/rotate-password", async (req, res) => {
+  const auth = await requireUser(req);
+  if (!auth.ok) {
+    return res.status(auth.status).json({ error: auth.error });
+  }
+
+  const admin = await requireAdmin(auth.user);
+  if (!admin.ok) {
+    return res.status(admin.error === "Forbidden" ? 403 : 500).json({ error: admin.error });
+  }
+
+  const bodySchema = z.object({ userId: z.string().min(1) });
+  let parsed: z.infer<typeof bodySchema>;
+  try {
+    parsed = bodySchema.parse(req.body);
+  } catch (e) {
+    const message = e instanceof Error ? e.message : "Invalid request";
+    return res.status(400).json({ error: message });
+  }
+
+  const url = getSupabaseUrl();
+  const serviceRole = getSupabaseServiceRoleKey();
+  if (!url || !serviceRole) {
+    return res.status(500).json({ error: "Supabase env not configured" });
+  }
+
+  const tempPassword = generateTempPassword();
+  const supabaseAdmin = createClient(url, serviceRole, { auth: { persistSession: false, autoRefreshToken: false } });
+  const { data: profileRow } = await supabaseAdmin.from("staff_profiles").select("role").eq("user_id", parsed.userId).maybeSingle();
+  const nextRole = String((profileRow as any)?.role ?? "staff");
+  const { error: updateErr } = await supabaseAdmin.auth.admin.updateUserById(parsed.userId, {
+    password: tempPassword,
+    app_metadata: { role: nextRole },
+  } as any);
+  if (updateErr) {
+    return res.status(400).json({ error: updateErr.message });
+  }
+
+  const { error: profileErr } = await supabaseAdmin
+    .from("staff_profiles")
+    .update({ must_change_password: true })
+    .eq("user_id", parsed.userId);
+  if (profileErr) {
+    return res.status(400).json({ error: profileErr.message });
+  }
+
+  return res.status(200).json({ userId: parsed.userId, tempPassword });
+});
+
 app.get("/api/places", async (req, res) => {
   try {
     const q = String(req.query.q ?? "").trim();
@@ -228,7 +540,7 @@ app.get("/api/places", async (req, res) => {
       return res.status(200).json({ results: [] });
     }
 
-    const googleKey = process.env.GOOGLE_PLACES_API_KEY || process.env.GOOGLE_MAPS_API_KEY;
+    const googleKey = process.env.GOOGLE_API_KEY || process.env.GOOGLE_MAPS_API_KEY;
     if (!googleKey) {
       const photon = new URL("https://photon.komoot.io/api/");
       photon.searchParams.set("q", q);
@@ -408,10 +720,14 @@ app.get("/api/places", async (req, res) => {
   }
 });
 
-const port = Number(process.env.PORT || 8787);
-app.listen(port, () => {
-  process.stdout.write(`API listening on http://localhost:${port}\n`);
-  if (!process.env.GOOGLE_MAPS_API_KEY && !process.env.GOOGLE_PLACES_API_KEY && !process.env.GOOGLE_DIRECTIONS_API_KEY) {
-    process.stdout.write("Warning: Google API keys are not set; /api/places and Google routing will be limited.\n");
-  }
-});
+if (!process.env.VERCEL) {
+  const port = Number(process.env.PORT || 8787);
+  app.listen(port, () => {
+    process.stdout.write(`API listening on http://localhost:${port}\n`);
+    if (!process.env.GOOGLE_MAPS_API_KEY && !process.env.GOOGLE_API_KEY) {
+      process.stdout.write("Warning: Google API keys are not set; /api/places and Google routing will be limited.\n");
+    }
+  });
+}
+
+export default app;
