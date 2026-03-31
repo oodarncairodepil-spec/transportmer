@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Navigate } from "react-router-dom";
 import { useAuth } from "@/components/AuthProvider";
 import { debugLog } from "@/lib/debug";
+import { apiFetchJson } from "@/lib/apiFetch";
 
 export default function RequireAdmin({ children }: { children: React.ReactNode }) {
   const { role, loading, profileLoading, session, refreshProfile, signOut } = useAuth();
@@ -33,29 +34,24 @@ export default function RequireAdmin({ children }: { children: React.ReactNode }
     setDenied(false);
     debugLog("RequireAdmin: checking admin via /api/staff");
 
-    fetch("/api/staff", { headers: { Authorization: `Bearer ${token}` }, signal: controller.signal })
-      .then(async (r) => {
-        debugLog("RequireAdmin: /api/staff status", r.status);
-        if (!r.ok) {
-          if (r.status === 401) {
+    apiFetchJson<{ staff: unknown[] }>(
+      "/api/staff",
+      { headers: { Authorization: `Bearer ${token}` }, signal: controller.signal },
+      { label: "GET /api/staff (RequireAdmin)" },
+    )
+      .then(async (result) => {
+        if ("error" in result) {
+          if (result.status === 401) {
             debugLog("RequireAdmin: 401, signing out");
             await signOut();
-          } else {
-            let body: any = null;
-            try {
-              body = await r.json();
-            } catch {}
-            debugLog("RequireAdmin: denied body", body);
           }
-          throw new Error("Forbidden");
+          throw new Error(result.error);
         }
+
         await refreshProfile();
       })
-
       .catch(() => {
-        if (controller.signal.aborted) {
-          return;
-        }
+        if (controller.signal.aborted) return;
         if (!cancelled) {
           debugLog("RequireAdmin: denied");
           setDenied(true);

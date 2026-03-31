@@ -11,6 +11,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { debugLog } from "@/lib/debug";
+import { apiFetchJson } from "@/lib/apiFetch";
 
 type StaffRow = {
   user_id: string;
@@ -58,24 +59,21 @@ export default function AdminStaff() {
     setError(null);
     try {
       debugLog("AdminStaff: loading staff");
-      const r = await fetch("/api/staff", {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      });
-      const data = (await r.json()) as any;
-      if (!r.ok) {
-        if (r.status === 401) {
+      const result = await apiFetchJson<{ staff: StaffRow[] }>("/api/staff", {
+        headers: { Authorization: `Bearer ${token}` },
+      }, { label: "GET /api/staff (AdminStaff)" });
+
+      if (!result.ok) {
+        if (result.status === 401) {
           await signOut();
         }
-        debugLog("AdminStaff: /api/staff failed", r.status, data);
-        setError(String(data?.error || "Failed to load staff"));
+        setError(result.raw ? `${result.error}\n\n${result.raw.slice(0, 300)}` : result.error);
         setStaff([]);
         setLoading(false);
         return;
       }
-      debugLog("AdminStaff: /api/staff ok", (data.staff ?? []).length);
-      setStaff((data.staff ?? []) as StaffRow[]);
+      debugLog("AdminStaff: /api/staff ok", (result.data.staff ?? []).length);
+      setStaff((result.data.staff ?? []) as StaffRow[]);
       setLoading(false);
     } catch (e) {
       debugLog("AdminStaff: load error", e instanceof Error ? e.message : e);
