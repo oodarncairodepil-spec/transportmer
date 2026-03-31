@@ -15,7 +15,7 @@ export default async function handler(req: any, res: any) {
       return json(res, { status: auth.status, body: isDebug(req) ? { error: auth.error, debug: auth.debug } : { error: auth.error } });
     }
 
-    const supabaseAdmin = getAdminClient();
+    const supabaseAdmin = await getAdminClient();
     if (!supabaseAdmin) {
       return json(res, { status: 200, body: { user: auth.user, profile: null } });
     }

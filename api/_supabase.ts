@@ -1,6 +1,10 @@
-import { createClient } from "@supabase/supabase-js";
-
 type JsonRes = { status: number; body: any };
+
+async function createSupabaseClient(url: string, key: string) {
+  const mod = (await import("@supabase/supabase-js")) as any;
+  const createClient = mod.createClient as (url: string, key: string, opts: any) => any;
+  return createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
+}
 
 function getHeader(req: any, name: string) {
   const headers = req?.headers ?? {};
@@ -53,7 +57,7 @@ export async function requireUser(req: any): Promise<
     };
   }
 
-  const supabase = createClient(url, anonKey, { auth: { persistSession: false, autoRefreshToken: false } });
+  const supabase = await createSupabaseClient(url, anonKey);
   const { data, error } = await supabase.auth.getUser(token);
   if (error || !data.user) {
     return { ok: false, status: 401, error: error?.message ? `Invalid auth token: ${error.message}` : "Invalid auth token" };
@@ -71,7 +75,7 @@ export async function requireAdmin(user: any): Promise<{ ok: true } | { ok: fals
     return { ok: false, status: 403, error: "Forbidden" };
   }
 
-  const supabaseAdmin = createClient(url, serviceRoleKey, { auth: { persistSession: false, autoRefreshToken: false } });
+  const supabaseAdmin = await createSupabaseClient(url, serviceRoleKey);
 
   const { data: profileRow, error } = await supabaseAdmin
     .from("staff_profiles")
@@ -103,16 +107,15 @@ export async function requireAdmin(user: any): Promise<{ ok: true } | { ok: fals
         },
         { onConflict: "user_id" },
       )
-      .then((r) => r.error);
+      .then((r: any) => r.error);
     if (!upsertErr) return { ok: true };
   }
 
   return { ok: false, status: 403, error: "Forbidden" };
 }
 
-export function getAdminClient() {
+export async function getAdminClient() {
   const { url, serviceRoleKey } = getEnv();
   if (!url || !serviceRoleKey) return null;
-  return createClient(url, serviceRoleKey, { auth: { persistSession: false, autoRefreshToken: false } });
+  return createSupabaseClient(url, serviceRoleKey);
 }
-

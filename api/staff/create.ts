@@ -32,7 +32,7 @@ export default async function handler(req: any, res: any) {
 
     const parsed = schema.parse(typeof req.body === "string" ? JSON.parse(req.body) : req.body);
 
-    const supabaseAdmin = getAdminClient();
+    const supabaseAdmin = await getAdminClient();
     if (!supabaseAdmin) {
       return json(res, { status: 500, body: { error: "Supabase env not configured" } });
     }
