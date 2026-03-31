@@ -1,5 +1,9 @@
 import { json, isDebug, requireUser, getAdminClient } from "./_supabase";
 
+export const config = {
+  runtime: "nodejs",
+};
+
 export default async function handler(req: any, res: any) {
   if (req.method !== "GET") {
     return json(res, { status: 405, body: { error: "Method not allowed" } });
