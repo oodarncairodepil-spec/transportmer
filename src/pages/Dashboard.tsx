@@ -1,10 +1,13 @@
+import { useMemo } from "react";
 import { Truck, Users, MapPin, Wrench, Package, Fuel, AlertTriangle, Activity } from "lucide-react";
-import { trucks, drivers, routes, workOrders, alerts, fuelHistory } from "@/data/mockData";
+import { trucks, routes, alerts, fuelHistory } from "@/data/mockData";
+import { loadDrivers } from "@/lib/driversStorage";
 import StatCard from "@/components/StatCard";
 import StatusBadge from "@/components/StatusBadge";
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar } from "recharts";
 
 export default function Dashboard() {
+  const drivers = useMemo(() => loadDrivers(), []);
   const activeTrucks = trucks.filter(t => t.status === 'Active').length;
   const inMaintenance = trucks.filter(t => t.status === 'In Maintenance').length;
   const activeDeliveries = routes.filter(r => r.status === 'In Progress').length;

@@ -3,6 +3,8 @@
 export interface Truck {
   id: string;
   plateNumber: string;
+  plateMonth?: string;
+  plateYear?: string;
   type: 'Trailer' | 'Box Truck' | 'Tanker' | 'Flatbed' | 'Refrigerated';
   capacity: string;
   status: 'Active' | 'In Maintenance' | 'Idle';
@@ -20,7 +22,9 @@ export interface Driver {
   id: string;
   name: string;
   licenseType: string;
-  status: 'Available' | 'Assigned' | 'Off-duty';
+  licenseValidMonth?: string;
+  licenseValidYear?: string;
+  status: 'Active' | 'Inactive';
   phone: string;
   rating: number;
   totalTrips: number;
@@ -50,6 +54,16 @@ export interface RouteStop {
   departedAt: string | null;
 }
 
+export interface WorkOrderHistory {
+  id: string;
+  timestamp: string;
+  message: string;
+  attachment?: {
+    name: string;
+    url: string;
+  };
+}
+
 export interface WorkOrder {
   id: string;
   title: string;
@@ -62,13 +76,14 @@ export interface WorkOrder {
   status: 'Pending' | 'In Progress' | 'Completed' | 'Cancelled';
   createdAt: string;
   dueDate: string;
+  history?: WorkOrderHistory[];
 }
 
 export interface MaintenanceRecord {
   id: string;
   truckId: string;
   type: 'Oil Change' | 'Tire Rotation' | 'Brake Inspection' | 'Engine Check' | 'Full Service';
-  status: 'Completed' | 'Scheduled' | 'Overdue';
+  status: 'Completed' | 'Scheduled' | 'Overdue' | 'Cancelled' | 'In Progress' | 'Pending';
   date: string;
   notes: string;
   cost: number;
@@ -97,14 +112,14 @@ export const trucks: Truck[] = [
 ];
 
 export const drivers: Driver[] = [
-  { id: 'DRV-001', name: 'Budi Santoso', licenseType: 'SIM B2', status: 'Assigned', phone: '+62 812-1234-5678', rating: 4.8, totalTrips: 342, assignedTruck: 'TRK-001', avatar: 'BS' },
-  { id: 'DRV-002', name: 'Agus Wibowo', licenseType: 'SIM B2', status: 'Assigned', phone: '+62 813-2345-6789', rating: 4.5, totalTrips: 256, assignedTruck: 'TRK-002', avatar: 'AW' },
-  { id: 'DRV-003', name: 'Siti Rahayu', licenseType: 'SIM B1', status: 'Available', phone: '+62 857-3456-7890', rating: 4.9, totalTrips: 189, assignedTruck: null, avatar: 'SR' },
-  { id: 'DRV-004', name: 'Eko Prasetyo', licenseType: 'SIM B2', status: 'Assigned', phone: '+62 821-4567-8901', rating: 4.3, totalTrips: 412, assignedTruck: 'TRK-004', avatar: 'EP' },
-  { id: 'DRV-005', name: 'Dewi Lestari', licenseType: 'SIM B1', status: 'Off-duty', phone: '+62 878-5678-9012', rating: 4.7, totalTrips: 167, assignedTruck: null, avatar: 'DL' },
-  { id: 'DRV-006', name: 'Hendra Gunawan', licenseType: 'SIM B2', status: 'Assigned', phone: '+62 815-6789-0123', rating: 4.6, totalTrips: 523, assignedTruck: 'TRK-006', avatar: 'HG' },
-  { id: 'DRV-007', name: 'Rizki Firmansyah', licenseType: 'SIM B2', status: 'Assigned', phone: '+62 838-7890-1234', rating: 4.4, totalTrips: 98, assignedTruck: 'TRK-007', avatar: 'RF' },
-  { id: 'DRV-008', name: 'Wahyu Nugroho', licenseType: 'SIM B2', status: 'Assigned', phone: '+62 852-8901-2345', rating: 4.1, totalTrips: 287, assignedTruck: 'TRK-008', avatar: 'WN' },
+  { id: 'DRV-001', name: 'Budi Santoso', licenseType: 'SIM B2', status: 'Active', phone: '+62 812-1234-5678', rating: 4.8, totalTrips: 342, assignedTruck: 'TRK-001', avatar: 'BS' },
+  { id: 'DRV-002', name: 'Agus Wibowo', licenseType: 'SIM B2', status: 'Active', phone: '+62 813-2345-6789', rating: 4.5, totalTrips: 256, assignedTruck: 'TRK-002', avatar: 'AW' },
+  { id: 'DRV-003', name: 'Siti Rahayu', licenseType: 'SIM B1', status: 'Active', phone: '+62 857-3456-7890', rating: 4.9, totalTrips: 189, assignedTruck: null, avatar: 'SR' },
+  { id: 'DRV-004', name: 'Eko Prasetyo', licenseType: 'SIM B2', status: 'Active', phone: '+62 821-4567-8901', rating: 4.3, totalTrips: 412, assignedTruck: 'TRK-004', avatar: 'EP' },
+  { id: 'DRV-005', name: 'Dewi Lestari', licenseType: 'SIM B1', status: 'Inactive', phone: '+62 878-5678-9012', rating: 4.7, totalTrips: 167, assignedTruck: null, avatar: 'DL' },
+  { id: 'DRV-006', name: 'Hendra Gunawan', licenseType: 'SIM B2', status: 'Active', phone: '+62 815-6789-0123', rating: 4.6, totalTrips: 523, assignedTruck: 'TRK-006', avatar: 'HG' },
+  { id: 'DRV-007', name: 'Rizki Firmansyah', licenseType: 'SIM B2', status: 'Active', phone: '+62 838-7890-1234', rating: 4.4, totalTrips: 98, assignedTruck: 'TRK-007', avatar: 'RF' },
+  { id: 'DRV-008', name: 'Wahyu Nugroho', licenseType: 'SIM B2', status: 'Active', phone: '+62 852-8901-2345', rating: 4.1, totalTrips: 287, assignedTruck: 'TRK-008', avatar: 'WN' },
   { id: 'DRV-009', name: 'Putri Handayani', licenseType: 'SIM B1', status: 'Available', phone: '+62 896-9012-3456', rating: 4.8, totalTrips: 145, assignedTruck: null, avatar: 'PH' },
   { id: 'DRV-010', name: 'Dimas Prabowo', licenseType: 'SIM B2', status: 'Assigned', phone: '+62 811-0123-4567', rating: 4.2, totalTrips: 376, assignedTruck: 'TRK-010', avatar: 'DP' },
   { id: 'DRV-011', name: 'Rina Susanti', licenseType: 'SIM B1', status: 'Available', phone: '+62 819-1234-5678', rating: 4.6, totalTrips: 203, assignedTruck: null, avatar: 'RS' },

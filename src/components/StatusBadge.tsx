@@ -8,6 +8,7 @@ interface StatusBadgeProps {
 const statusStyles: Record<string, string> = {
   'Active': 'status-active',
   'Available': 'status-active',
+  'Inactive': 'status-idle',
   'Completed': 'status-active',
   'In Progress': 'bg-primary/10 text-primary',
   'Assigned': 'bg-primary/10 text-primary',
@@ -19,6 +20,7 @@ const statusStyles: Record<string, string> = {
   'Overdue': 'status-danger',
   'Cancelled': 'status-danger',
   'Off-duty': 'status-idle',
+  'Off Duty': 'status-idle',
   'Idle': 'status-idle',
 };
 

@@ -52,7 +52,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             </div>
             {!collapsed && (
               <span className="text-lg font-bold text-sidebar-primary-foreground tracking-tight">
-                FleetOps
+                Transportmer
               </span>
             )}
           </div>

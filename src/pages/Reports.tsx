@@ -1,7 +1,10 @@
-import { trucks, routes, workOrders, fuelHistory, drivers } from "@/data/mockData";
+import { useMemo } from "react";
+import { trucks, routes, fuelHistory } from "@/data/mockData";
+import { loadDrivers } from "@/lib/driversStorage";
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, PieChart, Pie, Cell } from "recharts";
 
 export default function Reports() {
+  const drivers = useMemo(() => loadDrivers(), []);
   const statusData = [
     { name: 'Active', value: trucks.filter(t => t.status === 'Active').length },
     { name: 'Maintenance', value: trucks.filter(t => t.status === 'In Maintenance').length },
