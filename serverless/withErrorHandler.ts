@@ -72,6 +72,14 @@ export function withErrorHandler(handler: Handler, opts: WrappedOptions) {
       const err = e instanceof Error ? e : new Error("Unhandled error");
       console.error(`${opts.route} crash`, { message: err.message, stack: err.stack });
 
+      if ((e as any)?.code === "MISSING_ENV") {
+        return sendJson(res, 500, {
+          success: false,
+          error: "Server misconfigured",
+          message: err.message,
+        });
+      }
+
       sendJson(res, 500, {
         success: false,
         error: "Internal Server Error",
@@ -105,4 +113,3 @@ export function requireEnvOrThrow(required: Array<keyof ReturnType<typeof envRep
 export function sendJsonError(res: any, status: number, error: string, message?: string) {
   return sendJson(res, status, { success: false, error, message });
 }
-
