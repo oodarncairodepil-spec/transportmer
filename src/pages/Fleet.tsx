@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { addMonths, format } from "date-fns";
 import { type Truck } from "@/data/mockData";
 import { loadDrivers } from "@/lib/driversStorage";
@@ -15,12 +15,17 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { toast } from "@/components/ui/sonner";
-import { loadFleetTrucks, saveFleetTrucks } from "@/lib/fleetStorage";
 import { loadMaintenanceRecords } from "@/lib/maintenanceStorage";
 import { ChevronDown, Fuel, LayoutGrid, Plus, Search, Table2 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { apiFetchJson } from "@/lib/apiFetch";
+import { useAuth } from "@/components/AuthProvider";
+
+type FleetTruck = Truck & { dbId: string };
 
 export default function Fleet() {
+  const { session, signOut } = useAuth();
+  const token = session?.access_token ?? "";
   const drivers = useMemo(() => loadDrivers(), []);
   const maintenanceRecords = useMemo(() => loadMaintenanceRecords(), []);
   const [search, setSearch] = useState("");
@@ -28,9 +33,10 @@ export default function Fleet() {
   const [selectedStatuses, setSelectedStatuses] = useState<Truck["status"][]>(allStatuses);
   const [createOpen, setCreateOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
-  const [editingTruck, setEditingTruck] = useState<Truck | null>(null);
-  const [fleetTrucks, setFleetTrucks] = useState<Truck[]>(() => loadFleetTrucks());
+  const [editingTruck, setEditingTruck] = useState<FleetTruck | null>(null);
+  const [fleetTrucks, setFleetTrucks] = useState<FleetTruck[]>([]);
   const [viewMode, setViewMode] = useState<"grid" | "table">("table");
+  const [loading, setLoading] = useState(false);
 
   const filtered = useMemo(() => {
     return fleetTrucks.filter((t) => {
@@ -78,50 +84,107 @@ export default function Fleet() {
     return `TRK-${String(max + 1).padStart(3, "0")}`;
   };
 
-  const handleCreate = (values: CreateTruckValues) => {
-    let nextState: Truck[] | null = null;
-    let created: Truck | null = null;
-    let isDuplicate = false;
+  const loadFleet = useMemo(() => {
+    return async () => {
+      if (!token) return;
+      setLoading(true);
+      try {
+        const result = await apiFetchJson<{ success: boolean; trucks: Array<any> }>(
+          "/api/fleet",
+          { headers: { Authorization: `Bearer ${token}` } },
+          { label: "GET /api/fleet (Fleet)" },
+        );
+        if (result.ok === false) {
+          if (result.status === 401) {
+            await signOut();
+          }
+          toast.error("Failed to load fleet", { description: result.error });
+          setFleetTrucks([]);
+          setLoading(false);
+          return;
+        }
 
-    setFleetTrucks((prev) => {
-      isDuplicate = prev.some((t) => t.plateNumber.trim().toLowerCase() === values.plateNumber.trim().toLowerCase());
-      if (isDuplicate) {
-        return prev;
+        const mapped: FleetTruck[] = (result.data.trucks ?? []).map((r: any) => {
+          const id = String(r.legacy_id || r.legacyId || r.id || "");
+          return {
+            dbId: String(r.id),
+            id,
+            plateNumber: String(r.plate_number ?? r.plateNumber ?? ""),
+            plateMonth: r.plate_month ?? r.plateMonth ?? undefined,
+            plateYear: r.plate_year ?? r.plateYear ?? undefined,
+            type: r.type,
+            capacity: "—",
+            status: r.status,
+            assignedDrivers: [],
+            mileage: Number(r.mileage ?? 0),
+            fuelLevel: Number(r.fuel_level ?? 0),
+            lastService: r.last_service ? String(r.last_service) : "",
+            nextService: r.next_service ? String(r.next_service) : "",
+            lat: Number(r.lat ?? 0),
+            lng: Number(r.lng ?? 0),
+            location: String(r.location ?? ""),
+          } satisfies FleetTruck;
+        });
+
+        setFleetTrucks(mapped);
+        setLoading(false);
+      } catch (e) {
+        toast.error("Failed to load fleet", { description: e instanceof Error ? e.message : "Unknown error" });
+        setFleetTrucks([]);
+        setLoading(false);
       }
+    };
+  }, [token]);
 
-      const today = new Date();
-      created = {
-        id: getNextTruckId(prev),
-        plateNumber: values.plateNumber.trim(),
-        plateMonth: values.plateMonth,
-        plateYear: values.plateYear,
-        type: values.type,
-        capacity: "—",
-        status: values.status,
-        assignedDrivers: [],
-        mileage: 0,
-        fuelLevel: 100,
-        lastService: format(today, "yyyy-MM-dd"),
-        nextService: format(addMonths(today, 2), "yyyy-MM-dd"),
-        lat: 0,
-        lng: 0,
-        location: values.location.trim(),
-      };
+  useEffect(() => {
+    void loadFleet();
+  }, [loadFleet]);
 
-      nextState = [created, ...prev];
-      return nextState;
-    });
-
+  const handleCreate = async (values: CreateTruckValues) => {
+    if (!token) return;
+    const isDuplicate = fleetTrucks.some((t) => t.plateNumber.trim().toLowerCase() === values.plateNumber.trim().toLowerCase());
     if (isDuplicate) {
       toast.error("Plate number already exists", { description: values.plateNumber });
       return;
     }
 
-    if (nextState && created) {
-      saveFleetTrucks(nextState);
-      toast.success("Vehicle created", { description: `${created.plateNumber} • ${created.type}` });
-      setCreateOpen(false);
+    const legacyId = getNextTruckId(fleetTrucks);
+    const today = new Date();
+    const result = await apiFetchJson<{ success: boolean; truck: any }>(
+      "/api/fleet/create",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          legacyId,
+          plateNumber: values.plateNumber.trim(),
+          plateMonth: values.plateMonth,
+          plateYear: values.plateYear,
+          type: values.type,
+          status: values.status,
+          location: values.location.trim(),
+          mileage: 0,
+          fuelLevel: 100,
+          lastService: format(today, "yyyy-MM-dd"),
+          nextService: format(addMonths(today, 2), "yyyy-MM-dd"),
+          lat: 0,
+          lng: 0,
+        }),
+      },
+      { label: "POST /api/fleet/create (Fleet)" },
+    );
+
+    if (result.ok === false) {
+      if (result.status === 401) {
+        await signOut();
+      }
+      toast.error("Failed to create vehicle", { description: result.error });
+      return;
     }
+
+    toast.success("Vehicle created", { description: `${values.plateNumber.trim()} • ${values.type}` });
+    setCreateOpen(false);
+    await loadFleet();
   };
 
   const handleUpdate = (values: CreateTruckValues) => {
@@ -129,46 +192,47 @@ export default function Fleet() {
       return;
     }
 
-    let nextState: Truck[] | null = null;
-    let isDuplicate = false;
-
-    setFleetTrucks((prev) => {
-      isDuplicate = prev.some(
-        (t) => t.id !== editingTruck.id && t.plateNumber.trim().toLowerCase() === values.plateNumber.trim().toLowerCase(),
+    void (async () => {
+      if (!token) return;
+      const isDuplicate = fleetTrucks.some(
+        (t) => t.dbId !== editingTruck.dbId && t.plateNumber.trim().toLowerCase() === values.plateNumber.trim().toLowerCase(),
       );
       if (isDuplicate) {
-        return prev;
+        toast.error("Plate number already exists", { description: values.plateNumber });
+        return;
       }
 
-      nextState = prev.map((t) => {
-        if (t.id !== editingTruck.id) {
-          return t;
+      const result = await apiFetchJson<{ success: boolean; truck: any }>(
+        "/api/fleet/update",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+          body: JSON.stringify({
+            id: editingTruck.dbId,
+            plateNumber: values.plateNumber.trim(),
+            plateMonth: values.plateMonth,
+            plateYear: values.plateYear,
+            type: values.type,
+            status: values.status,
+            location: values.location.trim(),
+          }),
+        },
+        { label: "POST /api/fleet/update (Fleet)" },
+      );
+
+      if (result.ok === false) {
+        if (result.status === 401) {
+          await signOut();
         }
-        return {
-          ...t,
-          plateNumber: values.plateNumber.trim(),
-          plateMonth: values.plateMonth,
-          plateYear: values.plateYear,
-          type: values.type,
-          status: values.status,
-          location: values.location.trim(),
-        };
-      });
+        toast.error("Failed to update vehicle", { description: result.error });
+        return;
+      }
 
-      return nextState;
-    });
-
-    if (isDuplicate) {
-      toast.error("Plate number already exists", { description: values.plateNumber });
-      return;
-    }
-
-    if (nextState) {
-      saveFleetTrucks(nextState);
       toast.success("Vehicle updated", { description: `${values.plateNumber.trim()} • ${values.type}` });
       setEditOpen(false);
       setEditingTruck(null);
-    }
+      await loadFleet();
+    })();
   };
 
   return (
@@ -239,72 +303,78 @@ export default function Fleet() {
       </div>
 
       {viewMode === "grid" ? (
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-          {filtered.map((truck) => {
-            const assignedDrivers = drivers.filter((d) => truck.assignedDrivers.includes(d.id));
-            return (
-              <div key={truck.id} className="bg-card border border-border rounded-xl p-5 card-hover">
-                <div className="flex items-start justify-between mb-3">
-                  <div>
-                    <p className="text-sm font-bold text-foreground">{truck.plateNumber}</p>
-                    <p className="text-xs text-muted-foreground">
-                      {truck.id} • {truck.type}
-                    </p>
+        filtered.length === 0 ? (
+          <div className="bg-card border border-border rounded-xl p-8 text-center text-sm text-muted-foreground">
+            {loading ? "Loading…" : "No vehicles yet. Click Add to create your first fleet vehicle."}
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+            {filtered.map((truck) => {
+              const assignedDrivers = drivers.filter((d) => truck.assignedDrivers.includes(d.id));
+              return (
+                <div key={truck.dbId} className="bg-card border border-border rounded-xl p-5 card-hover">
+                  <div className="flex items-start justify-between mb-3">
+                    <div>
+                      <p className="text-sm font-bold text-foreground">{truck.plateNumber}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {truck.id} • {truck.type}
+                      </p>
+                    </div>
+                    <StatusBadge status={truck.status} />
                   </div>
-                  <StatusBadge status={truck.status} />
-                </div>
-                <div className="space-y-2.5 mt-4">
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="text-muted-foreground">Location</span>
-                    <span className="text-foreground font-medium">{truck.location}</span>
-                  </div>
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="text-muted-foreground">Mileage</span>
-                    <span className="text-foreground font-medium">{truck.mileage.toLocaleString()} km</span>
-                  </div>
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="text-muted-foreground">Driver</span>
-                    <span className="text-foreground font-medium">
-                      {assignedDrivers.length > 0 ? assignedDrivers.map((d) => d.name).join(", ") : "—"}
-                    </span>
-                  </div>
-                  <div className="pt-2">
-                    <div className="flex items-center justify-between text-xs mb-1">
-                      <span className="text-muted-foreground flex items-center gap-1">
-                        <Fuel className="w-3 h-3" /> Fuel
-                      </span>
-                      <span
-                        className={cn(
-                          "font-medium",
-                          truck.fuelLevel < 30
-                            ? "text-destructive"
-                            : truck.fuelLevel < 50
-                              ? "text-warning"
-                              : "text-success",
-                        )}
-                      >
-                        {truck.fuelLevel}%
+                  <div className="space-y-2.5 mt-4">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="text-muted-foreground">Location</span>
+                      <span className="text-foreground font-medium">{truck.location}</span>
+                    </div>
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="text-muted-foreground">Mileage</span>
+                      <span className="text-foreground font-medium">{truck.mileage.toLocaleString()} km</span>
+                    </div>
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="text-muted-foreground">Driver</span>
+                      <span className="text-foreground font-medium">
+                        {assignedDrivers.length > 0 ? assignedDrivers.map((d) => d.name).join(", ") : "—"}
                       </span>
                     </div>
-                    <div className="w-full h-1.5 bg-muted rounded-full overflow-hidden">
-                      <div
-                        className={cn(
-                          "h-full rounded-full transition-all",
-                          truck.fuelLevel < 30
-                            ? "bg-destructive"
-                            : truck.fuelLevel < 50
-                              ? "bg-warning"
-                              : "bg-success",
-                        )}
-                        style={{ width: `${truck.fuelLevel}%` }}
-                      />
+                    <div className="pt-2">
+                      <div className="flex items-center justify-between text-xs mb-1">
+                        <span className="text-muted-foreground flex items-center gap-1">
+                          <Fuel className="w-3 h-3" /> Fuel
+                        </span>
+                        <span
+                          className={cn(
+                            "font-medium",
+                            truck.fuelLevel < 30
+                              ? "text-destructive"
+                              : truck.fuelLevel < 50
+                                ? "text-warning"
+                                : "text-success",
+                          )}
+                        >
+                          {truck.fuelLevel}%
+                        </span>
+                      </div>
+                      <div className="w-full h-1.5 bg-muted rounded-full overflow-hidden">
+                        <div
+                          className={cn(
+                            "h-full rounded-full transition-all",
+                            truck.fuelLevel < 30
+                              ? "bg-destructive"
+                              : truck.fuelLevel < 50
+                                ? "bg-warning"
+                                : "bg-success",
+                          )}
+                          style={{ width: `${truck.fuelLevel}%` }}
+                        />
+                      </div>
                     </div>
                   </div>
                 </div>
-              </div>
-            );
-          })}
-        </div>
+              );
+            })}
+          </div>
+        )
       ) : (
         <div className="bg-card border border-border rounded-xl overflow-hidden">
           <Table>
@@ -320,29 +390,37 @@ export default function Fleet() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {filtered.map((truck) => {
-                const lastService = lastServiceByTruckId.get(truck.id) ?? truck.lastService;
-                return (
-                  <TableRow
-                    key={truck.id}
-                    className="cursor-pointer"
-                    onClick={() => {
-                      setEditingTruck(truck);
-                      setEditOpen(true);
-                    }}
-                  >
-                    <TableCell className="font-mono text-xs text-muted-foreground">{truck.id}</TableCell>
-                    <TableCell className="font-medium">{truck.plateNumber}</TableCell>
-                    <TableCell>{truck.type}</TableCell>
-                    <TableCell>
-                      <StatusBadge status={truck.status} />
-                    </TableCell>
-                    <TableCell className="max-w-[240px] truncate">{truck.location}</TableCell>
-                    <TableCell className="whitespace-nowrap">{lastService || "—"}</TableCell>
-                    <TableCell className="text-right">{truck.mileage.toLocaleString()} km</TableCell>
-                  </TableRow>
-                );
-              })}
+              {filtered.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={7} className="py-10 text-center text-sm text-muted-foreground">
+                    {loading ? "Loading…" : "No vehicles yet. Click Add to create your first fleet vehicle."}
+                  </TableCell>
+                </TableRow>
+              ) : (
+                filtered.map((truck) => {
+                  const lastService = lastServiceByTruckId.get(truck.id) ?? truck.lastService;
+                  return (
+                    <TableRow
+                      key={truck.dbId}
+                      className="cursor-pointer"
+                      onClick={() => {
+                        setEditingTruck(truck);
+                        setEditOpen(true);
+                      }}
+                    >
+                      <TableCell className="font-mono text-xs text-muted-foreground">{truck.id}</TableCell>
+                      <TableCell className="font-medium">{truck.plateNumber}</TableCell>
+                      <TableCell>{truck.type}</TableCell>
+                      <TableCell>
+                        <StatusBadge status={truck.status} />
+                      </TableCell>
+                      <TableCell className="max-w-[240px] truncate">{truck.location}</TableCell>
+                      <TableCell className="whitespace-nowrap">{lastService || "—"}</TableCell>
+                      <TableCell className="text-right">{truck.mileage.toLocaleString()} km</TableCell>
+                    </TableRow>
+                  );
+                })
+              )}
             </TableBody>
           </Table>
         </div>

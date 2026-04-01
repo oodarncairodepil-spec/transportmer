@@ -40,7 +40,7 @@ export type CreateTruckValues = z.infer<typeof createTruckSchema>;
 type Props = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onSubmit: (values: CreateTruckValues) => void;
+  onSubmit: (values: CreateTruckValues) => void | Promise<void>;
   mode?: "create" | "edit";
   initialData?: Truck;
 };
@@ -102,7 +102,12 @@ export default function CreateTruckDialog({ open, onOpenChange, onSubmit, mode =
         </DialogHeader>
 
         <Form {...form}>
-          <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+          <form
+            onSubmit={form.handleSubmit(async (values) => {
+              await onSubmit(values);
+            })}
+            className="space-y-4"
+          >
             <FormField
               control={form.control}
               name="plateNumber"
@@ -236,10 +241,12 @@ export default function CreateTruckDialog({ open, onOpenChange, onSubmit, mode =
             />
 
             <DialogFooter className="pt-2">
-              <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+              <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={form.formState.isSubmitting}>
                 Cancel
               </Button>
-              <Button type="submit">{mode === "edit" ? "Save" : "Create"}</Button>
+              <Button type="submit" disabled={form.formState.isSubmitting}>
+                {form.formState.isSubmitting ? "Saving…" : mode === "edit" ? "Save" : "Create"}
+              </Button>
             </DialogFooter>
           </form>
         </Form>
