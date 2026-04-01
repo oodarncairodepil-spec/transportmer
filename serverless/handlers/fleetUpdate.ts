@@ -55,7 +55,6 @@ export default withErrorHandler(
         location: parsed.location ?? null,
       })
       .eq("id", parsed.id)
-      .eq("user_id", auth.user.id)
       .select("id,legacy_id,plate_number,plate_month,plate_year,type,status,location,mileage,fuel_level,last_service,next_service,lat,lng,created_at")
       .single();
 
@@ -67,4 +66,3 @@ export default withErrorHandler(
   },
   { route: "/api/fleet/update" },
 );
-

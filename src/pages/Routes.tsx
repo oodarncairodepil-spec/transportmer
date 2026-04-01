@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import AddStopDialog from "@/components/AddStopDialog";
 import CreateLocationDialog from "@/components/CreateLocationDialog";
+import EditLocationDialog from "@/components/EditLocationDialog";
 import LocationPicker from "@/components/LocationPicker";
 import RouteMap from "@/components/RouteMap";
 import { toast } from "@/components/ui/sonner";
@@ -30,7 +31,10 @@ import {
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
-import { createLocation, loadLocations, saveLocations, upsertLocation, type SavedLocation } from "@/lib/locationsStorage";
+import { apiFetchJson } from "@/lib/apiFetch";
+import { useAuth } from "@/components/AuthProvider";
+import { getSupabaseClient } from "@/lib/supabaseClient";
+import { loadLocations, saveLocations, upsertLocation, type SavedLocation } from "@/lib/locationsStorage";
 import { loadRoutes, makeId, normalizeStops, saveRoutes, type RouteModel } from "@/lib/routesStorage";
 import { getTruckRouteOptions, type TruckRouteOption } from "@/lib/truckRouting";
 import { AlertTriangle, ArrowDown, ArrowUp, CheckCircle2, ChevronDown, Loader2, MapPin, Plus, Trash2, XCircle } from "lucide-react";
@@ -49,9 +53,11 @@ const makeDraft = (): RouteModel => {
 };
 
 export default function Routes() {
+  const { session, signOut } = useAuth();
+  const token = session?.access_token ?? "";
   const [routes, setRoutes] = useState<RouteModel[]>(() => loadRoutes());
   const [locations, setLocations] = useState<SavedLocation[]>(() => loadLocations());
-  const [selectedId, setSelectedId] = useState<string | null>(routes[0]?.id ?? null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
   const [draft, setDraft] = useState<RouteModel | null>(() => {
     const initial = selectedId ? routes.find((r) => r.id === selectedId) ?? null : null;
     return initial ? JSON.parse(JSON.stringify(initial)) : null;
@@ -65,11 +71,13 @@ export default function Routes() {
   const [pendingSelectId, setPendingSelectId] = useState<string | null>(null);
   const [pendingAction, setPendingAction] = useState<"select" | "new" | null>(null);
 
-  const [activeTab, setActiveTab] = useState<"editor" | "saved" | "locations">("editor");
+  const [activeTab, setActiveTab] = useState<"routes" | "locations">("routes");
   const [locationTabQuery, setLocationTabQuery] = useState("");
 
   const [addStopOpen, setAddStopOpen] = useState(false);
   const [createLocationOpen, setCreateLocationOpen] = useState(false);
+  const [editingLocation, setEditingLocation] = useState<SavedLocation | null>(null);
+  const [editLocationOpen, setEditLocationOpen] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
   const [routeOptions, setRouteOptions] = useState<TruckRouteOption[]>([]);
@@ -266,7 +274,7 @@ export default function Routes() {
     setDraft(next);
     setSavedSnapshot("");
     setFormError(null);
-    setActiveTab("editor");
+    setActiveTab("routes");
   };
 
   const requestSelect = (id: string) => {
@@ -281,7 +289,7 @@ export default function Routes() {
     setDraft(r ? JSON.parse(JSON.stringify(r)) : null);
     setSavedSnapshot(r ? JSON.stringify(r) : "");
     setFormError(null);
-    setActiveTab("editor");
+    setActiveTab("routes");
   };
 
   const requestNew = () => {
@@ -304,7 +312,7 @@ export default function Routes() {
       setDraft(r ? JSON.parse(JSON.stringify(r)) : null);
       setSavedSnapshot(r ? JSON.stringify(r) : "");
       setFormError(null);
-      setActiveTab("editor");
+      setActiveTab("routes");
     }
     setPendingAction(null);
     setPendingSelectId(null);
@@ -312,12 +320,16 @@ export default function Routes() {
 
   const canSave = !!draft?.origin && !!draft?.destination;
 
-  const saveCurrent = () => {
+  const saveCurrent = async () => {
     if (!draft) {
       return;
     }
     if (!draft.origin || !draft.destination) {
       setFormError("Origin and destination are required.");
+      return;
+    }
+    if (!token) {
+      toast.error("Please sign in to save routes");
       return;
     }
 
@@ -337,6 +349,44 @@ export default function Routes() {
       return next;
     });
 
+    if (selectedRoute) {
+      const result = await apiFetchJson<{ success: boolean; routeId: string; mapRouteId: string; recommendationId: string }>(
+        "/api/routes/save",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+          body: JSON.stringify({
+            routeDbId: nextDraft.id,
+            title: nextDraft.name,
+            origin: nextDraft.origin,
+            destination: nextDraft.destination,
+            stops: nextDraft.stops.map((s) => ({
+              position: s.position,
+              label: s.label,
+              lat: s.lat,
+              lng: s.lng,
+              source: s.source,
+              locationId: s.locationId,
+            })),
+            provider: selectedRoute.provider,
+            routeId: selectedRoute.id,
+            score: selectedRoute.score ?? 0,
+            isTruckSafe: selectedRoute.isTruckSafe ?? false,
+            violations: selectedRoute.violations ?? [],
+            geometry: selectedRoute.line,
+            segments: selectedRoute.segments ?? [],
+          }),
+        });
+      if (result.ok === false) {
+        if (result.status === 401) {
+          await signOut();
+        }
+        toast.error("Failed to save to Supabase", { description: result.error });
+        return;
+      }
+      toast.success("Saved to Supabase");
+    }
+
     setSelectedId(nextDraft.id);
     setDraft(JSON.parse(JSON.stringify(nextDraft)));
     setSavedSnapshot(JSON.stringify(nextDraft));
@@ -352,11 +402,9 @@ export default function Routes() {
     const id = draft.id;
     const exists = routes.some((r) => r.id === id);
     if (!exists) {
-      const nextId = routes[0]?.id ?? null;
-      setSelectedId(nextId);
-      const nextRoute = nextId ? routes.find((r) => r.id === nextId) ?? null : null;
-      setDraft(nextRoute ? JSON.parse(JSON.stringify(nextRoute)) : null);
-      setSavedSnapshot(nextRoute ? JSON.stringify(nextRoute) : "");
+      setSelectedId(null);
+      setDraft(null);
+      setSavedSnapshot("");
       toast.success("Draft discarded");
       return;
     }
@@ -364,11 +412,9 @@ export default function Routes() {
     const next = routes.filter((r) => r.id !== id);
     setRoutes(next);
     saveRoutes(next);
-    const nextId = next[0]?.id ?? null;
-    setSelectedId(nextId);
-    const nextRoute = nextId ? next.find((r) => r.id === nextId) ?? null : null;
-    setDraft(nextRoute ? JSON.parse(JSON.stringify(nextRoute)) : null);
-    setSavedSnapshot(nextRoute ? JSON.stringify(nextRoute) : "");
+    setSelectedId(null);
+    setDraft(null);
+    setSavedSnapshot("");
     setFormError(null);
     toast.success("Route deleted");
   };
@@ -429,6 +475,60 @@ export default function Routes() {
     };
   }, [draft?.destination, draft?.origin, draft?.stops]);
 
+  useEffect(() => {
+    if (!session?.user?.id) {
+      return;
+    }
+    const supabase = getSupabaseClient();
+    if (!supabase) {
+      return;
+    }
+
+    let cancelled = false;
+    supabase
+      .from("locations")
+      .select("id,label,lat,lng,source,kind,created_at")
+      .order("created_at", { ascending: false })
+      .then(({ data, error }) => {
+        if (cancelled) {
+          return;
+        }
+        if (error) {
+          return;
+        }
+
+        const mapped: SavedLocation[] = (data ?? []).map((r: any) => ({
+          id: String(r.id),
+          kind: (String(r.kind ?? "Other") as any) || "Other",
+          label: String(r.label ?? ""),
+          lat: Number(r.lat ?? 0),
+          lng: Number(r.lng ?? 0),
+          source: (String(r.source ?? "search") as any) || "search",
+          createdAt: String(r.created_at ?? new Date().toISOString()),
+          updatedAt: String(r.created_at ?? new Date().toISOString()),
+        }));
+
+        setLocations((prev) => {
+          const byKey = new Map<string, SavedLocation>();
+          const keyOf = (l: SavedLocation) => `${l.label.trim().toLowerCase()}|${l.lat.toFixed(6)}|${l.lng.toFixed(6)}`;
+          for (const l of mapped) byKey.set(keyOf(l), l);
+          for (const l of prev) {
+            const k = keyOf(l);
+            if (!byKey.has(k)) {
+              byKey.set(k, l);
+            }
+          }
+          const next = Array.from(byKey.values());
+          saveLocations(next);
+          return next;
+        });
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [session?.user?.id]);
+
   return (
     <div className="space-y-6">
       <Dialog open={routeLoading}>
@@ -470,104 +570,19 @@ export default function Routes() {
         </DropdownMenu>
       </div>
 
-      <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as "editor" | "saved" | "locations")}>
+      <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as "routes" | "locations")}>
         <TabsList className="w-full">
-          <TabsTrigger value="editor" className="flex-1">
-            Editor
-          </TabsTrigger>
-          <TabsTrigger value="saved" className="flex-1">
-            Saved routes ({routes.length})
+          <TabsTrigger value="routes" className="flex-1">
+            Routes ({routes.length})
           </TabsTrigger>
           <TabsTrigger value="locations" className="flex-1">
             Locations ({locations.length})
           </TabsTrigger>
         </TabsList>
 
-        <TabsContent value="saved">
-          <div className="bg-card border border-border rounded-xl overflow-hidden">
-            <div className="px-4 py-3 border-b border-border flex items-center justify-between">
-              <p className="text-sm font-semibold text-foreground">Saved routes</p>
-              <span className="text-xs text-muted-foreground bg-muted px-2 py-0.5 rounded-full">{routes.length}</span>
-            </div>
-            <div className="p-2 space-y-2 max-h-[calc(100vh-260px)] overflow-y-auto">
-              {routes.length === 0 ? (
-                <div className="p-6 text-center text-muted-foreground">
-                  <MapPin className="w-7 h-7 mx-auto mb-2 opacity-30" />
-                  <p className="text-sm">No routes yet</p>
-                  <p className="text-xs mt-1">Create your first route to see it here.</p>
-                </div>
-              ) : null}
-
-              {routes.map((r) => (
-                <button
-                  key={r.id}
-                  type="button"
-                  onClick={() => requestSelect(r.id)}
-                  className={cn(
-                    "w-full text-left rounded-lg border px-3 py-2.5 hover:bg-muted/30 transition-colors",
-                    selectedId === r.id ? "border-primary/40 bg-primary/5" : "border-border bg-background",
-                  )}
-                >
-                  <p className="text-xs font-semibold text-foreground line-clamp-1">{r.name?.trim() ? r.name : "Untitled route"}</p>
-                  <p className="text-[10px] text-muted-foreground mt-0.5 line-clamp-1">
-                    {(r.origin?.label ?? "Origin")} → {(r.destination?.label ?? "Destination")}
-                  </p>
-                </button>
-              ))}
-            </div>
-          </div>
-        </TabsContent>
-
-        <TabsContent value="locations">
-          <div className="bg-card border border-border rounded-xl overflow-hidden">
-            <div className="px-4 py-3 border-b border-border flex items-center justify-between gap-3">
-              <div className="min-w-0">
-                <p className="text-sm font-semibold text-foreground">Locations</p>
-                <p className="text-xs text-muted-foreground mt-0.5">Saved places you can reuse across routes.</p>
-              </div>
-              <Button variant="outline" onClick={() => setCreateLocationOpen(true)}>
-                <Plus className="w-4 h-4" /> Add
-              </Button>
-            </div>
-
-            <div className="p-3 border-b border-border">
-              <Input
-                value={locationTabQuery}
-                onChange={(e) => setLocationTabQuery(e.target.value)}
-                placeholder="Search locations"
-              />
-            </div>
-
-            <div className="p-2 space-y-2 max-h-[calc(100vh-310px)] overflow-y-auto">
-              {locations.length === 0 ? (
-                <div className="p-6 text-center text-muted-foreground">
-                  <MapPin className="w-7 h-7 mx-auto mb-2 opacity-30" />
-                  <p className="text-sm">No locations yet</p>
-                  <p className="text-xs mt-1">Create a location to reuse it as origin, destination, or stopover.</p>
-                </div>
-              ) : (
-                locations
-                  .filter((l) => {
-                    const q = locationTabQuery.trim().toLowerCase();
-                    if (!q) return true;
-                    return `${l.kind} ${l.label}`.toLowerCase().includes(q);
-                  })
-                  .sort((a, b) => a.label.localeCompare(b.label))
-                  .map((l) => (
-                    <div key={l.id} className="bg-background border border-border rounded-lg p-3">
-                      <p className="text-xs font-semibold text-foreground line-clamp-2">{l.label}</p>
-                      <p className="text-[10px] text-muted-foreground mt-1">
-                        {l.kind} • {l.lat.toFixed(6)}, {l.lng.toFixed(6)}
-                      </p>
-                    </div>
-                  ))
-              )}
-            </div>
-          </div>
-        </TabsContent>
-
-        <TabsContent value="editor">
-          <div className="space-y-4">
+        <TabsContent value="routes">
+          {draft ? (
+            <div className="space-y-4">
             {draft ? (
               <div className="bg-card border border-border rounded-xl p-5 space-y-4">
               <div className="flex items-start justify-between gap-3 flex-wrap">
@@ -576,8 +591,17 @@ export default function Routes() {
                   <p className="text-xs text-muted-foreground mt-1">Fill origin and destination, then add supporting locations.</p>
                 </div>
                 <div className="flex items-center gap-2">
-                  <Button variant="outline" onClick={deleteSelected}>
-                    <Trash2 className="w-4 h-4" /> {routes.some((r) => r.id === draft.id) ? "Delete" : "Discard"}
+                  {routes.some((r) => r.id === draft.id) ? (
+                    <Button variant="destructive" onClick={deleteSelected}>
+                      <Trash2 className="w-4 h-4 mr-2" /> Delete
+                    </Button>
+                  ) : null}
+                  <Button variant="outline" onClick={() => {
+                    setSelectedId(null);
+                    setDraft(null);
+                    setSavedSnapshot("");
+                  }}>
+                    {routes.some((r) => r.id === draft.id) ? "Cancel" : "Discard"}
                   </Button>
                   <Button onClick={saveCurrent} disabled={!canSave}>
                     Save
@@ -938,6 +962,96 @@ export default function Routes() {
               </div>
             )}
           </div>
+          ) : (
+            <div className="bg-card border border-border rounded-xl overflow-hidden">
+            <div className="px-4 py-3 border-b border-border flex items-center justify-between">
+              <p className="text-sm font-semibold text-foreground">Saved routes</p>
+              <span className="text-xs text-muted-foreground bg-muted px-2 py-0.5 rounded-full">{routes.length}</span>
+            </div>
+            <div className="p-2 space-y-2 max-h-[calc(100vh-260px)] overflow-y-auto">
+              {routes.length === 0 ? (
+                <div className="p-6 text-center text-muted-foreground">
+                  <MapPin className="w-7 h-7 mx-auto mb-2 opacity-30" />
+                  <p className="text-sm">No routes yet</p>
+                  <p className="text-xs mt-1">Create your first route to see it here.</p>
+                </div>
+              ) : null}
+
+              {routes.map((r) => (
+                <button
+                  key={r.id}
+                  type="button"
+                  onClick={() => requestSelect(r.id)}
+                  className={cn(
+                    "w-full text-left rounded-lg border px-3 py-2.5 hover:bg-muted/30 transition-colors",
+                    selectedId === r.id ? "border-primary/40 bg-primary/5" : "border-border bg-background",
+                  )}
+                >
+                  <p className="text-xs font-semibold text-foreground line-clamp-1">{r.name?.trim() ? r.name : "Untitled route"}</p>
+                  <p className="text-[10px] text-muted-foreground mt-0.5 line-clamp-1">
+                    {(r.origin?.label ?? "Origin")} → {(r.destination?.label ?? "Destination")}
+                  </p>
+                </button>
+              ))}
+            </div>
+          </div>
+          )}
+        </TabsContent>
+
+        <TabsContent value="locations">
+          <div className="bg-card border border-border rounded-xl overflow-hidden">
+            <div className="px-4 py-3 border-b border-border flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-foreground">Locations</p>
+                <p className="text-xs text-muted-foreground mt-0.5">Saved places you can reuse across routes.</p>
+              </div>
+              <Button variant="outline" onClick={() => setCreateLocationOpen(true)}>
+                <Plus className="w-4 h-4" /> Add
+              </Button>
+            </div>
+
+            <div className="p-3 border-b border-border">
+              <Input
+                value={locationTabQuery}
+                onChange={(e) => setLocationTabQuery(e.target.value)}
+                placeholder="Search locations"
+              />
+            </div>
+
+            <div className="p-2 space-y-2 max-h-[calc(100vh-310px)] overflow-y-auto">
+              {locations.length === 0 ? (
+                <div className="p-6 text-center text-muted-foreground">
+                  <MapPin className="w-7 h-7 mx-auto mb-2 opacity-30" />
+                  <p className="text-sm">No locations yet</p>
+                  <p className="text-xs mt-1">Create a location to reuse it as origin, destination, or stopover.</p>
+                </div>
+              ) : (
+                locations
+                  .filter((l) => {
+                    const q = locationTabQuery.trim().toLowerCase();
+                    if (!q) return true;
+                    return `${l.kind} ${l.label}`.toLowerCase().includes(q);
+                  })
+                  .sort((a, b) => a.label.localeCompare(b.label))
+                  .map((l) => (
+                    <button
+                      key={l.id}
+                      type="button"
+                      className="w-full text-left bg-background border border-border rounded-lg p-3 hover:bg-muted/30 transition-colors"
+                      onClick={() => {
+                        setEditingLocation(l);
+                        setEditLocationOpen(true);
+                      }}
+                    >
+                      <p className="text-xs font-semibold text-foreground line-clamp-2">{l.label}</p>
+                      <p className="text-[10px] text-muted-foreground mt-1">
+                        {l.kind} • {l.lat.toFixed(6)}, {l.lng.toFixed(6)}
+                      </p>
+                    </button>
+                  ))
+              )}
+            </div>
+          </div>
         </TabsContent>
       </Tabs>
 
@@ -973,18 +1087,114 @@ export default function Routes() {
         open={createLocationOpen}
         onOpenChange={setCreateLocationOpen}
         locations={locations}
-        onCreate={(next) => {
+        onCreate={async (next) => {
+          if (!session?.user?.id) {
+            throw new Error("Please sign in first");
+          }
+          const supabase = getSupabaseClient();
+          if (!supabase) {
+            throw new Error("Supabase client not configured");
+          }
+
           setLocations((prev) => {
             const exists = prev.some((l) => l.label.trim().toLowerCase() === next.label.trim().toLowerCase() && l.kind === next.kind);
             if (exists) {
               toast.error("Location already exists", { description: `${next.kind}: ${next.label}` });
               return prev;
             }
-            const created = createLocation(next);
+            return prev;
+          });
+
+          const { data, error } = await supabase
+            .from("locations")
+            .insert({
+              kind: next.kind,
+              label: next.label.trim(),
+              lat: next.lat,
+              lng: next.lng,
+              source: next.source,
+            })
+            .select("id,created_at")
+            .single();
+
+          if (error) {
+            throw new Error(error.message);
+          }
+
+          const createdAt = String((data as any)?.created_at ?? new Date().toISOString());
+          const created: SavedLocation = {
+            id: String((data as any)?.id),
+            kind: next.kind,
+            label: next.label.trim(),
+            lat: next.lat,
+            lng: next.lng,
+            source: next.source,
+            createdAt,
+            updatedAt: createdAt,
+          };
+
+          setLocations((prev) => {
             const updated = upsertLocation(prev, created);
             saveLocations(updated);
-            toast.success("Location created", { description: `${created.kind}: ${created.label}` });
             return updated;
+          });
+
+          toast.success("Location created", { description: `${created.kind}: ${created.label}` });
+        }}
+      />
+
+      <EditLocationDialog
+        open={editLocationOpen}
+        onOpenChange={setEditLocationOpen}
+        initial={editingLocation}
+        locations={locations}
+        onSave={async (next) => {
+          if (!session?.user?.id) {
+            throw new Error("Please sign in first");
+          }
+          const supabase = getSupabaseClient();
+          if (!supabase) {
+            throw new Error("Supabase client not configured");
+          }
+
+          const { error } = await supabase
+            .from("locations")
+            .update({
+              kind: next.kind,
+              label: next.label.trim(),
+              lat: next.lat,
+              lng: next.lng,
+              source: next.source,
+            })
+            .eq("id", next.id)
+          if (error) {
+            throw new Error(error.message);
+          }
+
+          setLocations((prev) => {
+            const updated = upsertLocation(prev, next);
+            saveLocations(updated);
+            return updated;
+          });
+        }}
+        onDelete={async (loc) => {
+          if (!session?.user?.id) {
+            throw new Error("Please sign in first");
+          }
+          const supabase = getSupabaseClient();
+          if (!supabase) {
+            throw new Error("Supabase client not configured");
+          }
+
+          const { error } = await supabase.from("locations").delete().eq("id", loc.id);
+          if (error) {
+            throw new Error(error.message);
+          }
+
+          setLocations((prev) => {
+            const next = prev.filter((l) => l.id !== loc.id);
+            saveLocations(next);
+            return next;
           });
         }}
       />

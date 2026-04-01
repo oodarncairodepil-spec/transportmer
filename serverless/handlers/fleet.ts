@@ -23,7 +23,6 @@ export default withErrorHandler(
         .select(
           "id,legacy_id,plate_number,plate_month,plate_year,type,status,location,mileage,fuel_level,last_service,next_service,lat,lng,created_at",
         )
-        .eq("user_id", auth.user.id)
         .order("created_at", { ascending: false });
       if (error) {
         return sendJsonError(res, 500, "DB error", error.message);
@@ -81,7 +80,6 @@ export default withErrorHandler(
       const { data, error } = await supabaseAdmin
         .from("fleet_trucks")
         .insert({
-          user_id: auth.user.id,
           legacy_id: parsed.legacyId,
           plate_number: parsed.plateNumber,
           plate_month: parsed.plateMonth ?? null,
@@ -117,7 +115,6 @@ export default withErrorHandler(
         location: parsed.location ?? null,
       })
       .eq("id", parsed.id)
-      .eq("user_id", auth.user.id)
       .select(
         "id,legacy_id,plate_number,plate_month,plate_year,type,status,location,mileage,fuel_level,last_service,next_service,lat,lng,created_at",
       )
@@ -130,4 +127,3 @@ export default withErrorHandler(
   },
   { route: "/api/fleet" },
 );
-

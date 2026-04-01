@@ -264,10 +264,18 @@ app.post("/api/truck-route", async (req, res) => {
     };
 
     if (parsed.save) {
-      const supabase = getSupabaseClient();
-      if (!supabase) {
+      const auth = await requireUser(req);
+      if (!auth.ok) {
+        return res.status(200).json({ ...response, saved: false, saveError: auth.error });
+      }
+
+      const url = getSupabaseUrl();
+      const serviceRole = getSupabaseServiceRoleKey();
+      if (!url || !serviceRole) {
         return res.status(200).json({ ...response, saved: false, saveError: "Supabase env not configured" });
       }
+
+      const supabase = createClient(url, serviceRole, { auth: { persistSession: false, autoRefreshToken: false } });
 
       const routeInsert = {
         title: parsed.title ?? null,
@@ -307,10 +315,218 @@ app.post("/api/truck-route", async (req, res) => {
         return res.status(200).json({ ...response, saved: false, saveError: recoErr.message, mapRouteId: routeRow.id });
       }
 
+      if (best.segments && best.segments.length > 0) {
+        const segmentsInsert = best.segments.map(seg => ({
+          map_route_recommendation_id: recoRow.id,
+          highway: seg.highway ?? null,
+          maxspeed: seg.maxspeed ?? null,
+          lanes: seg.lanes ?? null,
+          maxweight: seg.maxweight ?? null,
+          maxheight: seg.maxheight ?? null,
+          way: seg.osmWayId ? String(seg.osmWayId) : null,
+          score: seg.score ?? 0,
+          matched: seg.matched ?? false
+        }));
+
+        await supabase.from("map_route_segments").insert(segmentsInsert);
+      }
+
       return res.status(200).json({ ...response, saved: true, mapRouteId: routeRow.id, recommendationId: recoRow.id });
     }
 
     return res.status(200).json(response);
+  } catch (e) {
+    const message = e instanceof Error ? e.message : "Unknown error";
+    return res.status(400).json({ error: message });
+  }
+});
+
+const saveRouteSchema = z.object({
+  routeDbId: z.string(),
+  title: z.string().optional(),
+  origin: z.object({
+    label: z.string().optional(),
+    lat: z.number(),
+    lng: z.number(),
+    source: z.string().optional(),
+    locationId: z.string().optional(),
+  }),
+  destination: z.object({
+    label: z.string().optional(),
+    lat: z.number(),
+    lng: z.number(),
+    source: z.string().optional(),
+    locationId: z.string().optional(),
+  }),
+  stops: z
+    .array(
+      z.object({
+        position: z.number().int(),
+        label: z.string(),
+        lat: z.number(),
+        lng: z.number(),
+        source: z.string().optional(),
+        locationId: z.string().optional(),
+      }),
+    )
+    .optional()
+    .default([]),
+  truckConfig: truckConfigSchema.optional().default({ maxWeight: 15000, maxHeight: 4.0 }),
+  provider: z.string(),
+  routeId: z.string(),
+  score: z.number(),
+  isTruckSafe: z.boolean(),
+  violations: z.array(z.any()).optional().default([]),
+  polyline: z.string().optional(),
+  geometry: z.array(z.any()),
+  segments: z.array(z.any()).optional().default([]),
+});
+
+app.post("/api/routes/save", async (req, res) => {
+  try {
+    const auth = await requireUser(req);
+    if (!auth.ok) {
+      return res.status(auth.status).json({ error: auth.error });
+    }
+
+    const parsed = saveRouteSchema.parse(req.body);
+    const url = getSupabaseUrl();
+    const serviceRole = getSupabaseServiceRoleKey();
+    if (!url || !serviceRole) {
+      return res.status(500).json({ error: "Supabase env not configured" });
+    }
+
+    const supabase = createClient(url, serviceRole, { auth: { persistSession: false, autoRefreshToken: false } });
+
+    const routeKey = String(parsed.routeDbId).trim();
+    if (!routeKey) {
+      return res.status(400).json({ error: "Missing routeDbId" });
+    }
+    const originLabel = String(parsed.origin.label ?? "").trim() || "Origin";
+    const destLabel = String(parsed.destination.label ?? "").trim() || "Destination";
+
+    const { data: routeRow, error: routeErr } = await supabase
+      .from("routes")
+      .upsert(
+        {
+          name: parsed.title ?? null,
+          origin_label: originLabel,
+          origin_lat: parsed.origin.lat,
+          origin_lng: parsed.origin.lng,
+          destination_label: destLabel,
+          destination_lat: parsed.destination.lat,
+          destination_lng: parsed.destination.lng,
+          legacy_id: routeKey,
+        } as any,
+        { onConflict: "legacy_id" } as any,
+      )
+      .select("id")
+      .single();
+    if (routeErr) {
+      return res.status(400).json({ error: routeErr.message });
+    }
+
+    await supabase.from("route_stops").delete().eq("route_id", routeRow.id);
+    if (parsed.stops.length > 0) {
+      const { error: stopsErr } = await supabase.from("route_stops").insert(
+        parsed.stops.map((s) => ({
+          route_id: routeRow.id,
+          position: s.position,
+          label: s.label,
+          lat: s.lat,
+          lng: s.lng,
+          source: String(s.source ?? "search"),
+        })),
+      );
+      if (stopsErr) {
+        return res.status(400).json({ error: stopsErr.message, routeId: routeRow.id });
+      }
+    }
+
+    const { error: locErr } = await supabase.from("locations").upsert(
+      [
+        {
+          kind: "Other",
+          label: originLabel,
+          lat: parsed.origin.lat,
+          lng: parsed.origin.lng,
+          source: String(parsed.origin.source ?? "search"),
+        },
+        {
+          kind: "Other",
+          label: destLabel,
+          lat: parsed.destination.lat,
+          lng: parsed.destination.lng,
+          source: String(parsed.destination.source ?? "search"),
+        },
+        ...parsed.stops.map((s) => ({
+          kind: "Other",
+          label: s.label,
+          lat: s.lat,
+          lng: s.lng,
+          source: String(s.source ?? "search"),
+        })),
+      ] as any,
+      { onConflict: "label,lat,lng" } as any,
+    );
+    if (locErr) {
+      return res.status(400).json({ error: locErr.message, routeId: routeRow.id });
+    }
+
+    const { data: mapRouteRow, error: mapRouteErr } = await supabase
+      .from("map_routes")
+      .insert({
+        title: parsed.title ?? null,
+        origin: parsed.origin,
+        destination: parsed.destination,
+        stops: parsed.stops,
+        truck_config: parsed.truckConfig,
+      })
+      .select("id")
+      .single();
+    if (mapRouteErr) {
+      return res.status(400).json({ error: mapRouteErr.message, routeId: routeRow.id });
+    }
+
+    const { data: recoRow, error: recoErr } = await supabase
+      .from("map_route_recommendations")
+      .insert({
+        map_route_id: mapRouteRow.id,
+        provider: parsed.provider,
+        route_id: parsed.routeId,
+        score: parsed.score,
+        is_truck_safe: parsed.isTruckSafe,
+        violations: parsed.violations,
+        polyline: parsed.polyline ?? null,
+        geometry: parsed.geometry,
+        segments: parsed.segments,
+      })
+      .select("id")
+      .single();
+    if (recoErr) {
+      return res.status(400).json({ error: recoErr.message, routeId: routeRow.id, mapRouteId: mapRouteRow.id });
+    }
+
+    if (parsed.segments.length > 0) {
+      const { error: segErr } = await supabase.from("map_route_segments").insert(
+        parsed.segments.map((seg) => ({
+          map_route_recommendation_id: recoRow.id,
+          highway: seg.highway ?? null,
+          maxspeed: seg.maxspeed ?? null,
+          lanes: seg.lanes ?? null,
+          maxweight: seg.maxweight ?? null,
+          maxheight: seg.maxheight ?? null,
+          way: seg.osmWayId ? String(seg.osmWayId) : null,
+          score: seg.score ?? 0,
+          matched: seg.matched ?? false,
+        })),
+      );
+      if (segErr) {
+        return res.status(400).json({ error: segErr.message, routeId: routeRow.id, mapRouteId: mapRouteRow.id, recommendationId: recoRow.id });
+      }
+    }
+
+    return res.status(200).json({ success: true, routeId: routeRow.id, mapRouteId: mapRouteRow.id, recommendationId: recoRow.id });
   } catch (e) {
     const message = e instanceof Error ? e.message : "Unknown error";
     return res.status(400).json({ error: message });
@@ -570,7 +786,6 @@ app.get("/api/fleet", async (req, res) => {
   const { data, error } = await supabaseAdmin
     .from("fleet_trucks")
     .select("id,legacy_id,plate_number,plate_month,plate_year,type,status,location,mileage,fuel_level,last_service,next_service,lat,lng,created_at")
-    .eq("user_id", auth.user.id)
     .order("created_at", { ascending: false });
   if (error) {
     return res.status(500).json({ error: error.message });
@@ -639,7 +854,6 @@ app.post("/api/fleet", async (req, res) => {
     const { data, error } = await supabaseAdmin
       .from("fleet_trucks")
       .insert({
-        user_id: auth.user.id,
         legacy_id: parsed.legacyId,
         plate_number: parsed.plateNumber,
         plate_month: parsed.plateMonth ?? null,
@@ -673,7 +887,6 @@ app.post("/api/fleet", async (req, res) => {
       location: parsed.location ?? null,
     })
     .eq("id", parsed.id)
-    .eq("user_id", auth.user.id)
     .select("id,legacy_id,plate_number,plate_month,plate_year,type,status,location,mileage,fuel_level,last_service,next_service,lat,lng,created_at")
     .single();
   if (error) {
@@ -722,7 +935,6 @@ app.post("/api/fleet/create", async (req, res) => {
   const { data, error } = await supabaseAdmin
     .from("fleet_trucks")
     .insert({
-      user_id: auth.user.id,
       legacy_id: parsed.legacyId,
       plate_number: parsed.plateNumber,
       plate_month: parsed.plateMonth ?? null,
@@ -788,7 +1000,6 @@ app.post("/api/fleet/update", async (req, res) => {
       location: parsed.location ?? null,
     })
     .eq("id", parsed.id)
-    .eq("user_id", auth.user.id)
     .select("id,legacy_id,plate_number,plate_month,plate_year,type,status,location,mileage,fuel_level,last_service,next_service,lat,lng,created_at")
     .single();
   if (error) {
@@ -814,7 +1025,6 @@ app.get("/api/drivers", async (req, res) => {
   const { data, error } = await supabaseAdmin
     .from("drivers")
     .select("id,legacy_id,name,license_type,license_valid_month,license_valid_year,status,phone,rating,total_trips,avatar,created_at")
-    .eq("user_id", auth.user.id)
     .order("created_at", { ascending: false });
   if (error) {
     return res.status(500).json({ error: error.message });
@@ -882,7 +1092,7 @@ app.post("/api/drivers", async (req, res) => {
   const supabaseAdmin = createClient(url, serviceRole, { auth: { persistSession: false, autoRefreshToken: false } });
 
   if (parsed.action === "delete") {
-    const { error } = await supabaseAdmin.from("drivers").delete().eq("id", parsed.id).eq("user_id", auth.user.id);
+    const { error } = await supabaseAdmin.from("drivers").delete().eq("id", parsed.id);
     if (error) {
       return res.status(400).json({ error: error.message });
     }
@@ -893,7 +1103,6 @@ app.post("/api/drivers", async (req, res) => {
     const { data, error } = await supabaseAdmin
       .from("drivers")
       .insert({
-        user_id: auth.user.id,
         legacy_id: parsed.legacyId,
         name: parsed.name,
         license_type: parsed.licenseType,
@@ -925,7 +1134,6 @@ app.post("/api/drivers", async (req, res) => {
       avatar: parsed.avatar ?? null,
     })
     .eq("id", parsed.id)
-    .eq("user_id", auth.user.id)
     .select("id,legacy_id,name,license_type,license_valid_month,license_valid_year,status,phone,rating,total_trips,avatar,created_at")
     .single();
   if (error) {
@@ -1083,12 +1291,139 @@ app.post("/api/drivers/delete", async (req, res) => {
   }
 
   const supabaseAdmin = createClient(url, serviceRole, { auth: { persistSession: false, autoRefreshToken: false } });
-  const { error } = await supabaseAdmin.from("drivers").delete().eq("id", parsed.id).eq("user_id", auth.user.id);
+  const { error } = await supabaseAdmin.from("drivers").delete().eq("id", parsed.id);
   if (error) {
     return res.status(400).json({ error: error.message });
   }
 
   return res.status(200).json({ success: true });
+});
+
+app.get("/api/maintenance", async (req, res) => {
+  const auth = await requireUser(req);
+  if (!auth.ok) {
+    return res.status(auth.status).json({ error: auth.error });
+  }
+
+  const url = getSupabaseUrl();
+  const serviceRole = getSupabaseServiceRoleKey();
+  if (!url || !serviceRole) {
+    return res.status(500).json({ error: "Supabase env not configured" });
+  }
+
+  const supabaseAdmin = createClient(url, serviceRole, { auth: { persistSession: false, autoRefreshToken: false } });
+  const { data, error } = await supabaseAdmin
+    .from("maintenance_records")
+    .select("id,truck_id,type,status,date,notes,cost,created_at,updated_at")
+    .order("date", { ascending: false });
+  if (error) {
+    return res.status(500).json({ error: error.message });
+  }
+
+  return res.status(200).json({ success: true, records: data ?? [] });
+});
+
+app.post("/api/maintenance", async (req, res) => {
+  const auth = await requireUser(req);
+  if (!auth.ok) {
+    return res.status(auth.status).json({ error: auth.error });
+  }
+
+  const bodySchema = z.discriminatedUnion("action", [
+    z.object({
+      action: z.literal("create"),
+      truckId: z.string().min(1),
+      type: z.string().min(1),
+      status: z.string().min(1),
+      date: z.string().min(1),
+      notes: z.string().min(1),
+      cost: z.number().nonnegative(),
+    }),
+    z.object({
+      action: z.literal("update"),
+      id: z.string().min(1),
+      truckId: z.string().min(1),
+      type: z.string().min(1),
+      status: z.string().min(1),
+      date: z.string().min(1),
+      notes: z.string().min(1),
+      cost: z.number().nonnegative(),
+    }),
+    z.object({
+      action: z.literal("delete"),
+      id: z.string().min(1),
+    }),
+  ]);
+
+  let parsed: z.infer<typeof bodySchema>;
+  try {
+    parsed = bodySchema.parse(req.body);
+  } catch (e) {
+    const message = e instanceof Error ? e.message : "Invalid request";
+    return res.status(400).json({ error: message });
+  }
+
+  const url = getSupabaseUrl();
+  const serviceRole = getSupabaseServiceRoleKey();
+  if (!url || !serviceRole) {
+    return res.status(500).json({ error: "Supabase env not configured" });
+  }
+
+  const supabaseAdmin = createClient(url, serviceRole, { auth: { persistSession: false, autoRefreshToken: false } });
+
+  if (parsed.action === "delete") {
+    const { error } = await supabaseAdmin.from("maintenance_records").delete().eq("id", parsed.id);
+    if (error) {
+      return res.status(400).json({ error: error.message });
+    }
+    return res.status(200).json({ success: true });
+  }
+
+  const payload = {
+    truck_id: parsed.truckId,
+    type: parsed.type,
+    status: parsed.status,
+    date: parsed.date,
+    notes: parsed.notes,
+    cost: parsed.cost,
+  };
+
+  if (parsed.action === "create") {
+    const first = await supabaseAdmin
+      .from("maintenance_records")
+      .insert(payload as any)
+      .select("id,truck_id,type,status,date,notes,cost,created_at,updated_at")
+      .single();
+    if (!first.error) {
+      return res.status(200).json({ success: true, record: first.data });
+    }
+
+    const msg = String(first.error.message ?? "");
+    if (msg.toLowerCase().includes("user_id") && msg.toLowerCase().includes("null value")) {
+      const second = await supabaseAdmin
+        .from("maintenance_records")
+        .insert({ ...(payload as any), user_id: auth.user.id } as any)
+        .select("id,truck_id,type,status,date,notes,cost,created_at,updated_at")
+        .single();
+      if (second.error) {
+        return res.status(400).json({ error: second.error.message });
+      }
+      return res.status(200).json({ success: true, record: second.data });
+    }
+
+    return res.status(400).json({ error: first.error.message });
+  }
+
+  const { data, error } = await supabaseAdmin
+    .from("maintenance_records")
+    .update(payload as any)
+    .eq("id", parsed.id)
+    .select("id,truck_id,type,status,date,notes,cost,created_at,updated_at")
+    .single();
+  if (error) {
+    return res.status(400).json({ error: error.message });
+  }
+  return res.status(200).json({ success: true, record: data });
 });
 
 app.get("/api/work-orders", async (req, res) => {
@@ -1110,7 +1445,6 @@ app.get("/api/work-orders", async (req, res) => {
   const { data: orders, error } = await supabaseAdmin
     .from("work_orders")
     .select(workOrderSelect)
-    .eq("user_id", auth.user.id)
     .order("created_at", { ascending: false });
   if (error) {
     return res.status(500).json({ error: error.message });
@@ -1252,7 +1586,7 @@ app.post("/api/work-orders", async (req, res) => {
   const supabaseAdmin = createClient(url, serviceRole, { auth: { persistSession: false, autoRefreshToken: false } });
 
   if (parsed.action === "delete") {
-    const { error } = await supabaseAdmin.from("work_orders").delete().eq("id", parsed.id).eq("user_id", auth.user.id);
+    const { error } = await supabaseAdmin.from("work_orders").delete().eq("id", parsed.id);
     if (error) return res.status(400).json({ error: error.message });
     return res.status(200).json({ success: true });
   }
@@ -1271,7 +1605,6 @@ app.post("/api/work-orders", async (req, res) => {
   const { data: driverRow } = await supabaseAdmin
     .from("drivers")
     .select("id")
-    .eq("user_id", auth.user.id)
     .eq("legacy_id", parsed.driverId)
     .maybeSingle();
   if (!driverRow) return res.status(400).json({ error: "Invalid driver" });
@@ -1279,7 +1612,6 @@ app.post("/api/work-orders", async (req, res) => {
   const { data: truckRow } = await supabaseAdmin
     .from("fleet_trucks")
     .select("id")
-    .eq("user_id", auth.user.id)
     .eq("legacy_id", parsed.truckId)
     .maybeSingle();
   if (!truckRow) return res.status(400).json({ error: "Invalid truck" });
@@ -1288,7 +1620,6 @@ app.post("/api/work-orders", async (req, res) => {
     const { data, error } = await supabaseAdmin
       .from("work_orders")
       .insert({
-        user_id: auth.user.id,
         legacy_id: parsed.legacyId,
         title: parsed.title,
         driver_id: (driverRow as any).id,
@@ -1319,7 +1650,6 @@ app.post("/api/work-orders", async (req, res) => {
       due_date: parsed.dueDate,
     })
     .eq("id", parsed.id)
-    .eq("user_id", auth.user.id)
     .single();
   if (error) return res.status(400).json({ error: error.message });
   return res.status(200).json({ success: true, workOrder: data });

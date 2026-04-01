@@ -45,7 +45,7 @@ export async function scoreRoutes(params: {
   const results = await Promise.all(
     params.routes.map(async (r) => {
       const decoded = decodeGooglePolyline(r.polyline);
-      const sampled = sampleEveryMeters(decoded, 400);
+      const sampled = sampleEveryMeters(decoded, 1200);
       let ways = [] as Awaited<ReturnType<typeof fetchWaysForLine>>;
       try {
         ways = await fetchWaysForLine(sampled, { overpassUrl: params.overpassUrl, signal: params.signal });

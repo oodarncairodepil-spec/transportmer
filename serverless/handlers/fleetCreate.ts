@@ -53,7 +53,6 @@ export default withErrorHandler(
     const { data, error } = await supabaseAdmin
       .from("fleet_trucks")
       .insert({
-        user_id: auth.user.id,
         legacy_id: parsed.legacyId,
         plate_number: parsed.plateNumber,
         plate_month: parsed.plateMonth ?? null,
@@ -79,4 +78,3 @@ export default withErrorHandler(
   },
   { route: "/api/fleet/create" },
 );
-

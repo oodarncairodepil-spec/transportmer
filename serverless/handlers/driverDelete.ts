@@ -35,7 +35,7 @@ export default withErrorHandler(
       return sendJsonError(res, 500, "Supabase env not configured");
     }
 
-    const { error } = await supabaseAdmin.from("drivers").delete().eq("id", parsed.id).eq("user_id", auth.user.id);
+    const { error } = await supabaseAdmin.from("drivers").delete().eq("id", parsed.id);
     if (error) {
       return sendJsonError(res, 400, "Failed to delete driver", error.message);
     }
@@ -44,4 +44,3 @@ export default withErrorHandler(
   },
   { route: "/api/drivers/delete" },
 );
-

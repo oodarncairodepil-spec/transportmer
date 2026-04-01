@@ -11,22 +11,29 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { loadScheduleTemplates, saveScheduleTemplates, upsertScheduleTemplate, type ScheduleTemplate } from "@/lib/scheduleTemplatesStorage";
+import { toast } from "@/components/ui/sonner";
+import { useAuth } from "@/components/AuthProvider";
+import { getSupabaseClient } from "@/lib/supabaseClient";
+import { upsertScheduleTemplate, type ScheduleTemplate } from "@/lib/scheduleTemplatesStorage";
 
 type Props = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  onChanged?: (templates: ScheduleTemplate[]) => void;
 };
 
 type TemplateType = ScheduleTemplate["type"];
 
-export default function ManageScheduleTypesDialog({ open, onOpenChange }: Props) {
-  const [templates, setTemplates] = useState<ScheduleTemplate[]>(() => loadScheduleTemplates());
+export default function ManageScheduleTypesDialog({ open, onOpenChange, onChanged }: Props) {
+  const { session, signOut } = useAuth();
+  const token = session?.access_token ?? "";
+  const [templates, setTemplates] = useState<ScheduleTemplate[]>([]);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [type, setType] = useState<TemplateType>("shift");
   const [title, setTitle] = useState("");
   const [start, setStart] = useState("06:00");
   const [end, setEnd] = useState("18:00");
+  const [saving, setSaving] = useState(false);
 
   const sortedTemplates = useMemo(() => {
     return templates
@@ -53,14 +60,58 @@ export default function ManageScheduleTypesDialog({ open, onOpenChange }: Props)
     if (!open) {
       return;
     }
-    setTemplates(loadScheduleTemplates());
+    if (!token) {
+      setTemplates([]);
+      resetForm();
+      return;
+    }
+    const supabase = getSupabaseClient();
+    if (!supabase) {
+      setTemplates([]);
+      resetForm();
+      return;
+    }
+    supabase
+      .from("schedule_templates")
+      .select("id,type,title,start_time,end_time,created_at")
+      .order("type", { ascending: true })
+      .order("title", { ascending: true })
+      .then(({ data, error }) => {
+        if (error) {
+          toast.error("Failed to load schedule types", { description: error.message });
+          setTemplates([]);
+          resetForm();
+          return;
+        }
+        const mapped: ScheduleTemplate[] = (data ?? []).map((r: any) => ({
+          id: String(r.id),
+          type: r.type === "leave" ? "leave" : "shift",
+          title: String(r.title ?? ""),
+          start: String(r.start_time ?? ""),
+          end: String(r.end_time ?? ""),
+        }));
+        setTemplates(mapped);
+        onChanged?.(mapped);
+        resetForm();
+      });
     resetForm();
   }, [open]);
 
-  const save = () => {
+  const save = async () => {
     if (!canSave) {
       return;
     }
+    if (!token) {
+      toast.error("Please sign in first");
+      return;
+    }
+    const supabase = getSupabaseClient();
+    if (!supabase) {
+      toast.error("Supabase client not configured");
+      return;
+    }
+
+    setSaving(true);
     const next = upsertScheduleTemplate(templates, {
       id: editingId ?? undefined,
       type,
@@ -68,15 +119,72 @@ export default function ManageScheduleTypesDialog({ open, onOpenChange }: Props)
       start: type === "leave" ? "" : start,
       end: type === "leave" ? "" : end,
     });
-    setTemplates(next);
-    saveScheduleTemplates(next);
-    resetForm();
+
+    const payloadBase: any = {
+      type,
+      title: title.trim(),
+      start_time: type === "leave" ? null : start,
+      end_time: type === "leave" ? null : end,
+    };
+
+    try {
+      if (editingId) {
+        const { error } = await supabase.from("schedule_templates").update(payloadBase).eq("id", editingId);
+        if (error) {
+          toast.error("Failed to save schedule type", { description: error.message });
+          return;
+        }
+      } else {
+        const first = await supabase.from("schedule_templates").insert(payloadBase).select("id").single();
+        if (first.error) {
+          const msg = String(first.error.message ?? "").toLowerCase();
+          if (msg.includes("user_id") && msg.includes("null value")) {
+            const second = await supabase
+              .from("schedule_templates")
+              .insert({ ...payloadBase, user_id: session?.user?.id } as any)
+              .select("id")
+              .single();
+            if (second.error) {
+              toast.error("Failed to save schedule type", { description: second.error.message });
+              return;
+            }
+          } else if (msg.includes("jwt") || msg.includes("permission")) {
+            await signOut();
+            return;
+          } else {
+            toast.error("Failed to save schedule type", { description: first.error.message });
+            return;
+          }
+        }
+      }
+
+      setTemplates(next);
+      onChanged?.(next);
+      resetForm();
+      toast.success(editingId ? "Schedule type updated" : "Schedule type created");
+    } finally {
+      setSaving(false);
+    }
   };
 
-  const deleteTemplate = (id: string) => {
+  const deleteTemplate = async (id: string) => {
+    if (!token) {
+      toast.error("Please sign in first");
+      return;
+    }
+    const supabase = getSupabaseClient();
+    if (!supabase) {
+      toast.error("Supabase client not configured");
+      return;
+    }
+    const { error } = await supabase.from("schedule_templates").delete().eq("id", id);
+    if (error) {
+      toast.error("Failed to delete schedule type", { description: error.message });
+      return;
+    }
     const next = templates.filter((t) => t.id !== id);
     setTemplates(next);
-    saveScheduleTemplates(next);
+    onChanged?.(next);
     if (editingId === id) {
       resetForm();
     }
@@ -165,7 +273,7 @@ export default function ManageScheduleTypesDialog({ open, onOpenChange }: Props)
               <Button type="button" variant="outline" onClick={resetForm}>
                 Clear
               </Button>
-              <Button type="button" onClick={save} disabled={!canSave}>
+              <Button type="button" onClick={save} disabled={!canSave || saving}>
                 {editingId ? "Save changes" : "Create type"}
               </Button>
             </div>

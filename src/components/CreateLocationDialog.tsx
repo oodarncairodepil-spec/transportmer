@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import LocationPicker from "@/components/LocationPicker";
 import { Button } from "@/components/ui/button";
@@ -12,13 +12,14 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { toast } from "@/components/ui/sonner";
 import type { LocationInput } from "@/lib/routesStorage";
 import type { LocationKind, SavedLocation } from "@/lib/locationsStorage";
 
 type Props = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onCreate: (location: { kind: LocationKind; label: string; lat: number; lng: number; source: SavedLocation["source"] }) => void;
+  onCreate: (location: { kind: LocationKind; label: string; lat: number; lng: number; source: SavedLocation["source"] }) => Promise<void>;
   locations?: SavedLocation[];
 };
 
@@ -26,6 +27,13 @@ export default function CreateLocationDialog({ open, onOpenChange, onCreate, loc
   const [kind, setKind] = useState<LocationKind>("Warehouse");
   const [labelOverride, setLabelOverride] = useState("");
   const [picked, setPicked] = useState<LocationInput | null>(null);
+  const [creating, setCreating] = useState(false);
+
+  useEffect(() => {
+    if (open) {
+      setLabelOverride("");
+    }
+  }, [open]);
 
   const finalLabel = useMemo(() => {
     const base = (labelOverride || picked?.label || "").trim();
@@ -73,7 +81,7 @@ export default function CreateLocationDialog({ open, onOpenChange, onCreate, loc
               </Select>
             </div>
             <div className="space-y-2">
-              <p className="text-xs font-medium text-foreground">Label override</p>
+              <p className="text-xs font-medium text-foreground">Location Name</p>
               <Input value={labelOverride} onChange={(e) => setLabelOverride(e.target.value)} placeholder="Optional" />
             </div>
           </div>
@@ -86,16 +94,25 @@ export default function CreateLocationDialog({ open, onOpenChange, onCreate, loc
             Cancel
           </Button>
           <Button
-            onClick={() => {
+            onClick={async () => {
               if (!picked || !canCreate) {
                 return;
               }
-              onCreate({ kind, label: finalLabel, lat: picked.lat, lng: picked.lng, source: picked.source });
-              onOpenChange(false);
+              setCreating(true);
+              try {
+                await onCreate({ kind, label: finalLabel, lat: picked.lat, lng: picked.lng, source: picked.source });
+                setLabelOverride("");
+                onOpenChange(false);
+              } catch (e) {
+                const msg = e instanceof Error ? e.message : "Failed to create location";
+                toast.error("Failed to save location", { description: msg });
+              } finally {
+                setCreating(false);
+              }
             }}
-            disabled={!canCreate}
+            disabled={!canCreate || creating}
           >
-            Create
+            {creating ? "Saving…" : "Create"}
           </Button>
         </DialogFooter>
       </DialogContent>

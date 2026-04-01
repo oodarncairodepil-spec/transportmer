@@ -22,7 +22,6 @@ export default withErrorHandler(
     const { data, error } = await supabaseAdmin
       .from("fleet_trucks")
       .select("id,legacy_id,plate_number,plate_month,plate_year,type,status,location,mileage,fuel_level,last_service,next_service,lat,lng,created_at")
-      .eq("user_id", auth.user.id)
       .order("created_at", { ascending: false });
 
     if (error) {
@@ -33,4 +32,3 @@ export default withErrorHandler(
   },
   { route: "/api/fleet" },
 );
-

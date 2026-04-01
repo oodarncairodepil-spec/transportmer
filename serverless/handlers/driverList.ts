@@ -22,7 +22,6 @@ export default withErrorHandler(
     const { data, error } = await supabaseAdmin
       .from("drivers")
       .select("id,legacy_id,name,license_type,license_valid_month,license_valid_year,status,phone,rating,total_trips,avatar,created_at")
-      .eq("user_id", auth.user.id)
       .order("created_at", { ascending: false });
     if (error) {
       return sendJsonError(res, 500, "DB error", error.message);
@@ -32,4 +31,3 @@ export default withErrorHandler(
   },
   { route: "/api/drivers" },
 );
-

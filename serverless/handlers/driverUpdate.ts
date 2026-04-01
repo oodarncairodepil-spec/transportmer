@@ -57,7 +57,6 @@ export default withErrorHandler(
         avatar: parsed.avatar ?? null,
       })
       .eq("id", parsed.id)
-      .eq("user_id", auth.user.id)
       .select("id,legacy_id,name,license_type,license_valid_month,license_valid_year,status,phone,rating,total_trips,avatar,created_at")
       .single();
     if (error) {
@@ -68,4 +67,3 @@ export default withErrorHandler(
   },
   { route: "/api/drivers/update" },
 );
-

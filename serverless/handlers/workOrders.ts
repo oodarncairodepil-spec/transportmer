@@ -26,7 +26,6 @@ export default withErrorHandler(
       const { data: orders, error } = await supabaseAdmin
         .from("work_orders")
         .select(workOrderSelect)
-        .eq("user_id", auth.user.id)
         .order("created_at", { ascending: false });
 
       if (error) {
@@ -163,7 +162,7 @@ export default withErrorHandler(
     }
 
     if (parsed.action === "delete") {
-      const { error } = await supabaseAdmin.from("work_orders").delete().eq("id", parsed.id).eq("user_id", auth.user.id);
+      const { error } = await supabaseAdmin.from("work_orders").delete().eq("id", parsed.id);
       if (error) {
         return sendJsonError(res, 400, "Failed to delete work order", error.message);
       }
@@ -186,7 +185,6 @@ export default withErrorHandler(
     const { data: driverRow, error: driverErr } = await supabaseAdmin
       .from("drivers")
       .select("id")
-      .eq("user_id", auth.user.id)
       .eq("legacy_id", parsed.driverId)
       .maybeSingle();
     if (driverErr || !driverRow) {
@@ -196,7 +194,6 @@ export default withErrorHandler(
     const { data: truckRow, error: truckErr } = await supabaseAdmin
       .from("fleet_trucks")
       .select("id")
-      .eq("user_id", auth.user.id)
       .eq("legacy_id", parsed.truckId)
       .maybeSingle();
     if (truckErr || !truckRow) {
@@ -207,7 +204,6 @@ export default withErrorHandler(
       const { data, error } = await supabaseAdmin
         .from("work_orders")
         .insert({
-          user_id: auth.user.id,
           legacy_id: parsed.legacyId,
           title: parsed.title,
           driver_id: (driverRow as any).id,
@@ -241,7 +237,6 @@ export default withErrorHandler(
         due_date: parsed.dueDate,
       })
       .eq("id", parsed.id)
-      .eq("user_id", auth.user.id)
       .select(workOrderSelect)
       .single();
     if (error) {
@@ -252,4 +247,3 @@ export default withErrorHandler(
   },
   { route: "/api/work-orders" },
 );
-

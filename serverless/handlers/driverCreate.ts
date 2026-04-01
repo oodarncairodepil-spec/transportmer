@@ -50,7 +50,6 @@ export default withErrorHandler(
     const { data, error } = await supabaseAdmin
       .from("drivers")
       .insert({
-        user_id: auth.user.id,
         legacy_id: parsed.legacyId,
         name: parsed.name,
         license_type: parsed.licenseType,
@@ -72,4 +71,3 @@ export default withErrorHandler(
   },
   { route: "/api/drivers/create" },
 );
-

@@ -25,7 +25,7 @@ import {
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import type { MaintenanceRecord, Truck } from "@/data/mockData";
+import type { MaintenanceRecord } from "@/data/mockData";
 import { cn } from "@/lib/utils";
 import { Check, ChevronsUpDown } from "lucide-react";
 
@@ -60,11 +60,17 @@ const schema = z.object({
 
 export type CreateMaintenanceValues = z.infer<typeof schema>;
 
+export type MaintenanceTruckOption = {
+  id: string;
+  plateNumber: string;
+  code?: string;
+};
+
 type Props = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  trucks: Truck[];
-  onSubmit: (values: CreateMaintenanceValues) => void;
+  trucks: MaintenanceTruckOption[];
+  onSubmit: (values: CreateMaintenanceValues) => void | Promise<void>;
   mode?: "create" | "edit";
   initialData?: MaintenanceRecord;
 };
@@ -79,6 +85,7 @@ export default function CreateMaintenanceDialog({
 }: Props) {
   const [truckOpen, setTruckOpen] = useState(false);
   const [vehicleSearch, setVehicleSearch] = useState("");
+  const [submitting, setSubmitting] = useState(false);
 
   const truckOptions = useMemo(() => {
     let sorted = trucks
@@ -96,7 +103,7 @@ export default function CreateMaintenanceDialog({
       sorted = sorted.slice(0, 5); // Only show the first 5 vehicles if not searching deeply
     }
 
-    return sorted.map((t) => ({ id: t.id, label: `${t.plateNumber} (${t.id})` }));
+    return sorted.map((t) => ({ id: t.id, label: `${t.plateNumber} (${t.code ?? t.id})` }));
   }, [trucks, vehicleSearch]);
 
   const form = useForm<CreateMaintenanceValues>({
@@ -177,7 +184,17 @@ export default function CreateMaintenanceDialog({
         </DialogHeader>
 
         <Form {...form}>
-          <form onSubmit={form.handleSubmit((v) => onSubmit(v))} className="space-y-4">
+          <form
+            onSubmit={form.handleSubmit(async (v) => {
+              setSubmitting(true);
+              try {
+                await onSubmit(v);
+              } finally {
+                setSubmitting(false);
+              }
+            })}
+            className="space-y-4"
+          >
             <FormField
               control={form.control}
               name="truckId"
@@ -355,11 +372,11 @@ export default function CreateMaintenanceDialog({
             />
 
             <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+              <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={submitting}>
                 Cancel
               </Button>
-              <Button type="submit" disabled={!canSubmit}>
-                {mode === "edit" ? "Save" : "Add"}
+              <Button type="submit" disabled={!canSubmit || submitting}>
+                {submitting ? "Saving…" : mode === "edit" ? "Save" : "Add"}
               </Button>
             </DialogFooter>
           </form>

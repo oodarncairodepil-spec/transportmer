@@ -25,7 +25,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import type { Driver } from "@/data/mockData";
 import type { ScheduleDay, ScheduleType } from "@/lib/schedulingStorage";
-import { loadScheduleTemplates } from "@/lib/scheduleTemplatesStorage";
+import type { ScheduleTemplate } from "@/lib/scheduleTemplatesStorage";
 import { cn } from "@/lib/utils";
 import { Check, ChevronsUpDown } from "lucide-react";
 
@@ -56,6 +56,7 @@ type Props = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   drivers: Driver[];
+  templates: ScheduleTemplate[];
   onCreate: (values: CreateScheduleEventValues) => void;
   mode?: "create" | "edit";
   initialValues?: Partial<CreateScheduleEventValues>;
@@ -66,6 +67,7 @@ export default function CreateScheduleEventDialog({
   open,
   onOpenChange,
   drivers,
+  templates,
   onCreate,
   mode = "create",
   initialValues,
@@ -73,7 +75,6 @@ export default function CreateScheduleEventDialog({
 }: Props) {
   const [driverOpen, setDriverOpen] = useState(false);
   const [driverSearch, setDriverSearch] = useState("");
-  const [templates, setTemplates] = useState(() => loadScheduleTemplates());
   const [selectedTemplateId, setSelectedTemplateId] = useState<string>("__default__");
   const driverOptions = useMemo(() => {
     return drivers
