@@ -554,6 +554,147 @@ app.post("/api/staff/rotate-password", async (req, res) => {
   return res.status(200).json({ userId: parsed.userId, tempPassword });
 });
 
+app.get("/api/fleet", async (req, res) => {
+  const auth = await requireUser(req);
+  if (!auth.ok) {
+    return res.status(auth.status).json({ error: auth.error });
+  }
+
+  const url = getSupabaseUrl();
+  const serviceRole = getSupabaseServiceRoleKey();
+  if (!url || !serviceRole) {
+    return res.status(500).json({ error: "Supabase env not configured" });
+  }
+
+  const supabaseAdmin = createClient(url, serviceRole, { auth: { persistSession: false, autoRefreshToken: false } });
+  const { data, error } = await supabaseAdmin
+    .from("fleet_trucks")
+    .select("id,legacy_id,plate_number,plate_month,plate_year,type,status,location,mileage,fuel_level,last_service,next_service,lat,lng,created_at")
+    .eq("user_id", auth.user.id)
+    .order("created_at", { ascending: false });
+  if (error) {
+    return res.status(500).json({ error: error.message });
+  }
+
+  return res.status(200).json({ success: true, trucks: data ?? [] });
+});
+
+app.post("/api/fleet/create", async (req, res) => {
+  const auth = await requireUser(req);
+  if (!auth.ok) {
+    return res.status(auth.status).json({ error: auth.error });
+  }
+
+  const bodySchema = z.object({
+    legacyId: z.string().min(1),
+    plateNumber: z.string().min(3),
+    plateMonth: z.string().optional(),
+    plateYear: z.string().optional(),
+    type: z.string().min(1),
+    status: z.string().min(1),
+    location: z.string().optional(),
+    mileage: z.number().optional(),
+    fuelLevel: z.number().optional(),
+    lastService: z.string().optional(),
+    nextService: z.string().optional(),
+    lat: z.number().optional(),
+    lng: z.number().optional(),
+  });
+
+  let parsed: z.infer<typeof bodySchema>;
+  try {
+    parsed = bodySchema.parse(req.body);
+  } catch (e) {
+    const message = e instanceof Error ? e.message : "Invalid request";
+    return res.status(400).json({ error: message });
+  }
+
+  const url = getSupabaseUrl();
+  const serviceRole = getSupabaseServiceRoleKey();
+  if (!url || !serviceRole) {
+    return res.status(500).json({ error: "Supabase env not configured" });
+  }
+
+  const supabaseAdmin = createClient(url, serviceRole, { auth: { persistSession: false, autoRefreshToken: false } });
+  const { data, error } = await supabaseAdmin
+    .from("fleet_trucks")
+    .insert({
+      user_id: auth.user.id,
+      legacy_id: parsed.legacyId,
+      plate_number: parsed.plateNumber,
+      plate_month: parsed.plateMonth ?? null,
+      plate_year: parsed.plateYear ?? null,
+      type: parsed.type,
+      status: parsed.status,
+      location: parsed.location ?? null,
+      mileage: parsed.mileage ?? 0,
+      fuel_level: parsed.fuelLevel ?? 0,
+      last_service: parsed.lastService ?? null,
+      next_service: parsed.nextService ?? null,
+      lat: parsed.lat ?? null,
+      lng: parsed.lng ?? null,
+    })
+    .select("id,legacy_id,plate_number,plate_month,plate_year,type,status,location,mileage,fuel_level,last_service,next_service,lat,lng,created_at")
+    .single();
+  if (error) {
+    return res.status(400).json({ error: error.message });
+  }
+
+  return res.status(200).json({ success: true, truck: data });
+});
+
+app.post("/api/fleet/update", async (req, res) => {
+  const auth = await requireUser(req);
+  if (!auth.ok) {
+    return res.status(auth.status).json({ error: auth.error });
+  }
+
+  const bodySchema = z.object({
+    id: z.string().min(1),
+    plateNumber: z.string().min(3),
+    plateMonth: z.string().optional(),
+    plateYear: z.string().optional(),
+    type: z.string().min(1),
+    status: z.string().min(1),
+    location: z.string().optional(),
+  });
+
+  let parsed: z.infer<typeof bodySchema>;
+  try {
+    parsed = bodySchema.parse(req.body);
+  } catch (e) {
+    const message = e instanceof Error ? e.message : "Invalid request";
+    return res.status(400).json({ error: message });
+  }
+
+  const url = getSupabaseUrl();
+  const serviceRole = getSupabaseServiceRoleKey();
+  if (!url || !serviceRole) {
+    return res.status(500).json({ error: "Supabase env not configured" });
+  }
+
+  const supabaseAdmin = createClient(url, serviceRole, { auth: { persistSession: false, autoRefreshToken: false } });
+  const { data, error } = await supabaseAdmin
+    .from("fleet_trucks")
+    .update({
+      plate_number: parsed.plateNumber,
+      plate_month: parsed.plateMonth ?? null,
+      plate_year: parsed.plateYear ?? null,
+      type: parsed.type,
+      status: parsed.status,
+      location: parsed.location ?? null,
+    })
+    .eq("id", parsed.id)
+    .eq("user_id", auth.user.id)
+    .select("id,legacy_id,plate_number,plate_month,plate_year,type,status,location,mileage,fuel_level,last_service,next_service,lat,lng,created_at")
+    .single();
+  if (error) {
+    return res.status(400).json({ error: error.message });
+  }
+
+  return res.status(200).json({ success: true, truck: data });
+});
+
 app.get("/api/places", async (req, res) => {
   try {
     const q = String(req.query.q ?? "").trim();
