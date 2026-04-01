@@ -1,5 +1,5 @@
-import { useMemo, useState } from "react";
-import { Navigate, useNavigate } from "react-router-dom";
+import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 
 import { useAuth } from "@/components/AuthProvider";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -8,6 +8,7 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { debugLog } from "@/lib/debug";
+import { apiFetchJson } from "@/lib/apiFetch";
 
 export default function ResetPassword() {
   const navigate = useNavigate();
@@ -72,18 +73,22 @@ export default function ResetPassword() {
 
                 setSubmitting(true);
                 try {
-                  const r = await fetch("/api/auth/update-password", {
-                    method: "POST",
-                    headers: {
-                      "Content-Type": "application/json",
-                      Authorization: `Bearer ${session.access_token}`,
+                  const result = await apiFetchJson<{ ok: true }>(
+                    "/api/auth/update-password",
+                    {
+                      method: "POST",
+                      headers: {
+                        "Content-Type": "application/json",
+                        Authorization: `Bearer ${session.access_token}`,
+                      },
+                      body: JSON.stringify({ newPassword }),
                     },
-                    body: JSON.stringify({ newPassword }),
-                  });
-                  const data = (await r.json()) as any;
-                  if (!r.ok) {
-                    debugLog("ResetPassword.update-password error", r.status, data);
-                    setError(String(data?.error || "Failed to update password"));
+                    { label: "POST /api/auth/update-password (ResetPassword)" },
+                  );
+
+                  if (result.ok === false) {
+                    debugLog("ResetPassword.update-password error", result.status, result.error);
+                    setError(result.error);
                     setSubmitting(false);
                     return;
                   }

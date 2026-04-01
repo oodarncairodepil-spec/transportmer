@@ -9,6 +9,7 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { debugLog } from "@/lib/debug";
+import { apiFetchJson } from "@/lib/apiFetch";
 
 type LocationState = {
   from?: { pathname?: string };
@@ -83,22 +84,26 @@ export default function ForceChangePassword() {
                 setSubmitting(true);
                 try {
                   debugLog("ForceChangePassword: submitting update-password; token length", session.access_token?.length ?? 0);
-                  const r = await fetch("/api/auth/update-password", {
-                    method: "POST",
-                    headers: {
-                      "Content-Type": "application/json",
-                      Authorization: `Bearer ${session.access_token}`,
+                  const result = await apiFetchJson<{ ok: true }>(
+                    "/api/auth/update-password",
+                    {
+                      method: "POST",
+                      headers: {
+                        "Content-Type": "application/json",
+                        Authorization: `Bearer ${session.access_token}`,
+                      },
+                      body: JSON.stringify({ newPassword }),
                     },
-                    body: JSON.stringify({ newPassword }),
-                  });
-                  const data = (await r.json()) as any;
-                  if (!r.ok) {
-                    if (r.status === 401) {
+                    { label: "POST /api/auth/update-password (ForceChangePassword)" },
+                  );
+
+                  if (result.ok === false) {
+                    if (result.status === 401) {
                       await signOut();
                       navigate("/login", { replace: true, state: { from: location } });
                       return;
                     }
-                    setError(String(data?.error || "Failed to update password"));
+                    setError(result.error);
                     setSubmitting(false);
                     return;
                   }

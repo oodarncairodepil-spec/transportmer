@@ -29,14 +29,18 @@ export async function searchPlaces(query: string, signal?: AbortSignal): Promise
   try {
     const apiUrl = new URL("/api/places", window.location.origin);
     apiUrl.searchParams.set("q", q);
-    const apiRes = await fetch(apiUrl.toString(), {
-      method: "GET",
-      signal,
-      headers: { Accept: "application/json" },
-    });
-    if (apiRes.ok) {
-      const data = (await apiRes.json()) as { results?: Array<{ label: string; lat: number; lng: number }> };
-      const results = (data.results ?? []).filter((r) => Number.isFinite(r.lat) && Number.isFinite(r.lng));
+    const { apiFetchJson } = await import("@/lib/apiFetch");
+    const result = await apiFetchJson<{ results?: Array<{ label: string; lat: number; lng: number }> }>(
+      apiUrl.toString(),
+      {
+        method: "GET",
+        signal,
+        headers: { Accept: "application/json" },
+      },
+      { label: "GET /api/places" },
+    );
+    if (result.ok) {
+      const results = (result.data.results ?? []).filter((r) => Number.isFinite(r.lat) && Number.isFinite(r.lng));
       if (results.length > 0) {
         return results.slice(0, 6);
       }

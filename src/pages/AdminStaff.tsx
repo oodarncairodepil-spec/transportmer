@@ -63,7 +63,7 @@ export default function AdminStaff() {
         headers: { Authorization: `Bearer ${token}` },
       }, { label: "GET /api/staff (AdminStaff)" });
 
-      if (!result.ok) {
+      if (result.ok === false) {
         if (result.status === 401) {
           await signOut();
         }
@@ -128,33 +128,34 @@ export default function AdminStaff() {
                   if (!token) return;
                   setCreating(true);
                   setError(null);
-                  setOneTimeEmail(null);
-                  setOneTimePassword(null);
-
                   try {
-                    const r = await fetch("/api/staff/create", {
-                      method: "POST",
-                      headers: {
-                        "Content-Type": "application/json",
-                        Authorization: `Bearer ${token}`,
+                    const result = await apiFetchJson<{ userId: string; tempPassword: string }>(
+                      "/api/staff/create",
+                      {
+                        method: "POST",
+                        headers: {
+                          "Content-Type": "application/json",
+                          Authorization: `Bearer ${token}`,
+                        },
+                        body: JSON.stringify({
+                          email: email.trim(),
+                          name: name.trim(),
+                          role: staffRole,
+                          phone: phone.trim() ? phone.trim() : undefined,
+                          title: title.trim() ? title.trim() : undefined,
+                        }),
                       },
-                      body: JSON.stringify({
-                        email: email.trim(),
-                        name: name.trim(),
-                        role: staffRole,
-                        phone: phone.trim() ? phone.trim() : undefined,
-                        title: title.trim() ? title.trim() : undefined,
-                      }),
-                    });
-                    const data = (await r.json()) as any;
-                    if (!r.ok) {
-                      setError(String(data?.error || "Failed to create staff"));
+                      { label: "POST /api/staff/create (AdminStaff)" },
+                    );
+
+                    if (result.ok === false) {
+                      setError(result.error);
                       setCreating(false);
                       return;
                     }
 
                     setOneTimeEmail(email.trim());
-                    setOneTimePassword(String(data.tempPassword || ""));
+                    setOneTimePassword(String(result.data.tempPassword || ""));
                     setEmail("");
                     setName("");
                     setPhone("");
@@ -315,21 +316,25 @@ export default function AdminStaff() {
                           setRotateOpen(true);
                           setRotating(true);
                           try {
-                            const r = await fetch("/api/staff/rotate-password", {
-                              method: "POST",
-                              headers: {
-                                "Content-Type": "application/json",
-                                Authorization: `Bearer ${token}`,
+                            const result = await apiFetchJson<{ userId: string; tempPassword: string }>(
+                              "/api/staff/rotate-password",
+                              {
+                                method: "POST",
+                                headers: {
+                                  "Content-Type": "application/json",
+                                  Authorization: `Bearer ${token}`,
+                                },
+                                body: JSON.stringify({ userId: s.user_id }),
                               },
-                              body: JSON.stringify({ userId: s.user_id }),
-                            });
-                            const data = (await r.json()) as any;
-                            if (!r.ok) {
-                              setRotateError(String(data?.error || "Failed to rotate password"));
+                              { label: "POST /api/staff/rotate-password (AdminStaff)" },
+                            );
+
+                            if (result.ok === false) {
+                              setRotateError(result.error);
                               setRotating(false);
                               return;
                             }
-                            setOneTimePassword(String(data.tempPassword || ""));
+                            setOneTimePassword(String(result.data.tempPassword || ""));
                             setRotating(false);
                             await loadStaff();
                           } catch (err) {

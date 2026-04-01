@@ -1,4 +1,5 @@
 import type { LatLng } from "@/lib/routesStorage";
+import { apiFetchJson } from "@/lib/apiFetch";
 
 export type TruckRouteStep = {
   instruction: string;
@@ -120,7 +121,7 @@ function buildInstruction(step: { maneuver: { type: string; modifier?: string };
   const modifier = step.maneuver.modifier;
   const type = step.maneuver.type;
 
-  const mod = modifier ? modifier.replaceAll("_", " ") : "";
+  const mod = modifier ? modifier.replace(/_/g, " ") : "";
   const prettyMod = mod.length > 0 ? mod[0].toUpperCase() + mod.slice(1) : "";
 
   if (type === "depart") {
@@ -191,22 +192,26 @@ export async function getTruckRouteOptions(
   signal?: AbortSignal,
 ) {
   try {
-    const res = await fetch("/api/truck-route", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        origin,
-        destination,
-        stops: opts?.stops ?? [],
-        alternatives: true,
-        minScore: -1,
-        truckConfig: { maxWeight: 15000, maxHeight: 4.0 },
-      }),
-      signal,
-    });
+    const result = await apiFetchJson<BackendResponse>(
+      "/api/truck-route",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          origin,
+          destination,
+          stops: opts?.stops ?? [],
+          alternatives: true,
+          minScore: -1,
+          truckConfig: { maxWeight: 15000, maxHeight: 4.0 },
+        }),
+        signal,
+      },
+      { label: "POST /api/truck-route" },
+    );
 
-    if (res.ok) {
-      const data = (await res.json()) as BackendResponse;
+    if (result.ok) {
+      const data = result.data;
       if (data && Array.isArray(data.routes) && data.routes.length > 0) {
         const mapped = data.routes.map((r) => {
           const steps = Array.isArray(r.steps) ? r.steps : [];
