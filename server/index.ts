@@ -381,10 +381,32 @@ app.post("/api/auth/update-password", async (req, res) => {
     return res.status(400).json({ error: pwErr.message });
   }
 
+  const { data: existingProfile } = await supabaseAdmin
+    .from("staff_profiles")
+    .select("role")
+    .eq("user_id", auth.user.id)
+    .maybeSingle();
+  const metaRole = String((auth.user?.app_metadata as any)?.role ?? "").trim().toLowerCase();
+  const role =
+    String((existingProfile as any)?.role ?? "")?.trim().toLowerCase() ||
+    (metaRole === "admin" || metaRole === "staff" ? metaRole : "staff");
+
+  const email = String((auth.user as any)?.email ?? `${auth.user.id}@local`);
+  const name = String((((auth.user as any)?.user_metadata as any)?.name ?? email ?? "User")).trim();
+
   const { error: profileErr } = await supabaseAdmin
     .from("staff_profiles")
-    .update({ must_change_password: false })
-    .eq("user_id", auth.user.id);
+    .upsert(
+      {
+        user_id: auth.user.id,
+        email,
+        name,
+        role,
+        must_change_password: false,
+        created_by_user_id: auth.user.id,
+      },
+      { onConflict: "user_id" },
+    );
   if (profileErr) {
     return res.status(200).json({ ok: true, profileUpdated: false, profileError: profileErr.message });
   }

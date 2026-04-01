@@ -8,22 +8,15 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { debugLog } from "@/lib/debug";
-import { getSupabaseClient } from "@/lib/supabaseClient";
 
 export default function ResetPassword() {
   const navigate = useNavigate();
-  const { session, refreshProfile } = useAuth();
-
-  const supabase = useMemo(() => getSupabaseClient(), []);
+  const { session, refreshProfile, signOut } = useAuth();
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState(false);
-
-  if (!supabase) {
-    return <Navigate to="/login" replace />;
-  }
 
   const matches = newPassword.length > 0 && confirmPassword.length > 0 && newPassword === confirmPassword;
   const canSubmit = matches && newPassword.length >= 8 && !submitting;
@@ -79,15 +72,24 @@ export default function ResetPassword() {
 
                 setSubmitting(true);
                 try {
-                  const { error: updateErr } = await supabase.auth.updateUser({ password: newPassword });
-                  if (updateErr) {
-                    debugLog("ResetPassword.updateUser error", updateErr.message);
-                    setError(updateErr.message);
+                  const r = await fetch("/api/auth/update-password", {
+                    method: "POST",
+                    headers: {
+                      "Content-Type": "application/json",
+                      Authorization: `Bearer ${session.access_token}`,
+                    },
+                    body: JSON.stringify({ newPassword }),
+                  });
+                  const data = (await r.json()) as any;
+                  if (!r.ok) {
+                    debugLog("ResetPassword.update-password error", r.status, data);
+                    setError(String(data?.error || "Failed to update password"));
                     setSubmitting(false);
                     return;
                   }
 
                   await refreshProfile();
+                  await signOut();
                   setDone(true);
                   setSubmitting(false);
                   navigate("/login", { replace: true });
@@ -137,4 +139,3 @@ export default function ResetPassword() {
     </div>
   );
 }
-
