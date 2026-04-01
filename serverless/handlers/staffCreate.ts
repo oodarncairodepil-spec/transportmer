@@ -1,7 +1,8 @@
 import { z } from "zod";
-import { generateTempPassword } from "../../server/lib/tempPassword";
-import { getAdminClient, requireAdmin, requireUser } from "../supabase";
-import { requireEnvOrThrow, sendJsonError, withErrorHandler } from "../withErrorHandler";
+
+import { generateTempPassword } from "../../server/lib/tempPassword.js";
+import { getAdminClient, requireAdmin, requireUser } from "../supabase.js";
+import { requireEnvOrThrow, sendJsonError, withErrorHandler } from "../withErrorHandler.js";
 
 export default withErrorHandler(
   async (req, res) => {

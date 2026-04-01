@@ -15,7 +15,7 @@ function sendJson(res: any, status: number, body: any) {
 
 export default async function handler(req: any, res: any) {
   try {
-    const mod = (await import("../handlers/staffCreate")) as any;
+    const mod = (await import("../../serverless/handlers/staffCreate.js")) as any;
     const inner = mod.default as (req: any, res: any) => any;
     return await inner(req, res);
   } catch (e) {

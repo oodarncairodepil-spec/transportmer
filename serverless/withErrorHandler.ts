@@ -72,7 +72,7 @@ export function withErrorHandler(handler: Handler, opts: WrappedOptions) {
       const err = e instanceof Error ? e : new Error("Unhandled error");
       console.error(`${opts.route} crash`, { message: err.message, stack: err.stack });
 
-      const payload = {
+      sendJson(res, 500, {
         success: false,
         error: "Internal Server Error",
         message: debug ? err.message : undefined,
@@ -84,8 +84,7 @@ export function withErrorHandler(handler: Handler, opts: WrappedOptions) {
               method: req?.method,
             }
           : undefined,
-      };
-      sendJson(res, 500, payload);
+      });
     }
   };
 }

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { json, isDebug, requireUser, getAdminClient } from "../supabase";
+import { json, isDebug, requireUser, getAdminClient } from "../../serverless/supabase.js";
 
 export const config = {
   runtime: "nodejs",
