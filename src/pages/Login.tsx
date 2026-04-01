@@ -22,7 +22,7 @@ export default function Login() {
 
   const fromPath = useMemo(() => {
     const state = location.state as LocationState | null;
-    return state?.from?.pathname ?? "/routes";
+    return state?.from?.pathname ?? "/";
   }, [location.state]);
 
   const [email, setEmail] = useState("");
@@ -48,7 +48,7 @@ export default function Login() {
         <Card>
           <CardHeader>
             <CardTitle>Sign in</CardTitle>
-            <CardDescription>Sign in to manage your routes.</CardDescription>
+            <CardDescription>Sign in to access your dashboard.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             {!configured && (
