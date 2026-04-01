@@ -1,64 +1,29 @@
-import { z } from "zod";
-import { generateTempPassword } from "../../server/lib/tempPassword";
-import { requireAdmin, requireUser, getAdminClient } from "../supabase";
-import { requireEnvOrThrow, sendJsonError, withErrorHandler } from "../withErrorHandler";
-
 export const config = {
   runtime: "nodejs",
 };
 
-export default withErrorHandler(
-  async (req: any, res: any) => {
-    if (req.method !== "POST") {
-      return sendJsonError(res, 405, "Method not allowed");
+function sendJson(res: any, status: number, body: any) {
+  try {
+    if (typeof res.status === "function" && typeof res.json === "function") {
+      return res.status(status).json(body);
     }
+  } catch {}
+  res.statusCode = status;
+  res.setHeader?.("content-type", "application/json; charset=utf-8");
+  res.end(JSON.stringify(body));
+}
 
-    requireEnvOrThrow(["SUPABASE_URL", "SUPABASE_ANON_KEY", "SUPABASE_SERVICE_ROLE_KEY"]);
-
-    const auth = await requireUser(req);
-    if (!auth.ok) {
-      return sendJsonError(res, auth.status, auth.error);
-    }
-
-    const admin = await requireAdmin(auth.user);
-    if (!admin.ok) {
-      return sendJsonError(res, admin.status, admin.error);
-    }
-
-    const schema = z.object({ userId: z.string().min(1) });
-    let parsed: z.infer<typeof schema>;
-    try {
-      parsed = schema.parse(typeof req.body === "string" ? JSON.parse(req.body) : req.body);
-    } catch (e) {
-      const message = e instanceof Error ? e.message : "Invalid request";
-      return sendJsonError(res, 400, "Invalid request", message);
-    }
-
-    const supabaseAdmin = await getAdminClient();
-    if (!supabaseAdmin) {
-      return sendJsonError(res, 500, "Supabase env not configured");
-    }
-
-    const tempPassword = generateTempPassword();
-    const { data: profileRow } = await supabaseAdmin.from("staff_profiles").select("role").eq("user_id", parsed.userId).maybeSingle();
-    const nextRole = String((profileRow as any)?.role ?? "staff");
-    const { error: updateErr } = await supabaseAdmin.auth.admin.updateUserById(parsed.userId, {
-      password: tempPassword,
-      app_metadata: { role: nextRole },
-    } as any);
-    if (updateErr) {
-      return sendJsonError(res, 400, "Failed to update user", updateErr.message);
-    }
-
-    const { error: profileErr } = await supabaseAdmin
-      .from("staff_profiles")
-      .update({ must_change_password: true })
-      .eq("user_id", parsed.userId);
-    if (profileErr) {
-      return sendJsonError(res, 400, "Failed to update profile", profileErr.message);
-    }
-
-    return res.status(200).json({ success: true, userId: parsed.userId, tempPassword });
-  },
-  { route: "/api/staff/rotate-password" },
-);
+export default async function handler(req: any, res: any) {
+  try {
+    const mod = (await import("../handlers/staffRotatePassword")) as any;
+    const inner = mod.default as (req: any, res: any) => any;
+    return await inner(req, res);
+  } catch (e) {
+    const err = e instanceof Error ? e : new Error("Server error");
+    return sendJson(res, 500, {
+      success: false,
+      error: "Function initialization failed",
+      message: String(req?.query?.debug ?? "") === "1" ? err.message : undefined,
+    });
+  }
+}

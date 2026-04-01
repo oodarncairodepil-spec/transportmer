@@ -1,43 +1,27 @@
-export const config = {
-  runtime: "nodejs",
-};
+export const config = { runtime: "nodejs" };
 
-import { getAdminClient, requireAdmin, requireUser } from "./supabase";
-import { requireEnvOrThrow, sendJsonError, withErrorHandler } from "./withErrorHandler";
-
-export default withErrorHandler(
-  async (req, res) => {
-    if (req.method !== "GET") {
-      return sendJsonError(res, 405, "Method not allowed");
+function sendJson(res: any, status: number, body: any) {
+  try {
+    if (typeof res.status === "function" && typeof res.json === "function") {
+      return res.status(status).json(body);
     }
+  } catch {}
+  res.statusCode = status;
+  res.setHeader?.("content-type", "application/json; charset=utf-8");
+  res.end(JSON.stringify(body));
+}
 
-    requireEnvOrThrow(["SUPABASE_URL", "SUPABASE_ANON_KEY", "SUPABASE_SERVICE_ROLE_KEY"]);
-
-    const auth = await requireUser(req);
-    if (!auth.ok) {
-      return sendJsonError(res, auth.status, auth.error);
-    }
-
-    const admin = await requireAdmin(auth.user);
-    if (!admin.ok) {
-      return sendJsonError(res, admin.status, admin.error);
-    }
-
-    const supabaseAdmin = await getAdminClient();
-    if (!supabaseAdmin) {
-      return sendJsonError(res, 500, "Supabase env not configured");
-    }
-
-    const { data, error } = await supabaseAdmin
-      .from("staff_profiles")
-      .select("user_id,email,name,phone,title,role,must_change_password,created_at")
-      .order("created_at", { ascending: false });
-
-    if (error) {
-      return sendJsonError(res, 500, "DB error", error.message);
-    }
-
-    return res.status(200).json({ success: true, staff: data ?? [] });
-  },
-  { route: "/api/staff" },
-);
+export default async function handler(req: any, res: any) {
+  try {
+    const mod = (await import("./handlers/staff")) as any;
+    const inner = mod.default as (req: any, res: any) => any;
+    return await inner(req, res);
+  } catch (e) {
+    const err = e instanceof Error ? e : new Error("Server error");
+    return sendJson(res, 500, {
+      success: false,
+      error: "Function initialization failed",
+      message: String(req?.query?.debug ?? "") === "1" ? err.message : undefined,
+    });
+  }
+}
