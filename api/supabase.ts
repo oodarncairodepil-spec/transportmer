@@ -13,8 +13,8 @@ function getHeader(req: any, name: string) {
 }
 
 export function getEnv() {
-  const url = String(process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || "").trim();
-  const anonKey = String(process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY || "").trim();
+  const url = String(process.env.SUPABASE_URL || "").trim();
+  const anonKey = String(process.env.SUPABASE_ANON_KEY || "").trim();
   const serviceRoleKey = String(process.env.SUPABASE_SERVICE_ROLE_KEY || "").trim();
   return {
     url: url || null,
@@ -119,3 +119,4 @@ export async function getAdminClient() {
   if (!url || !serviceRoleKey) return null;
   return createSupabaseClient(url, serviceRoleKey);
 }
+

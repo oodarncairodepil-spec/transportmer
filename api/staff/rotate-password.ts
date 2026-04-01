@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { generateTempPassword } from "../../server/lib/tempPassword";
-import { json, isDebug, requireAdmin, requireUser, getAdminClient } from "../_supabase";
-import { requireEnvOrThrow, sendJsonError, withErrorHandler } from "../_withErrorHandler";
+import { requireAdmin, requireUser, getAdminClient } from "../supabase";
+import { requireEnvOrThrow, sendJsonError, withErrorHandler } from "../withErrorHandler";
 
 export const config = {
   runtime: "nodejs",

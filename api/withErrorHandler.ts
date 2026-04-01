@@ -15,8 +15,8 @@ function maskEnvValue(v: string | null) {
 }
 
 export function envReport() {
-  const url = String(process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || "").trim() || null;
-  const anonKey = String(process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY || "").trim() || null;
+  const url = String(process.env.SUPABASE_URL || "").trim() || null;
+  const anonKey = String(process.env.SUPABASE_ANON_KEY || "").trim() || null;
   const serviceRoleKey = String(process.env.SUPABASE_SERVICE_ROLE_KEY || "").trim() || null;
 
   const missing = {

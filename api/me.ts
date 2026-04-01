@@ -1,4 +1,4 @@
-import { json, isDebug, requireUser, getAdminClient } from "./_supabase";
+import { json, isDebug, requireUser, getAdminClient } from "./supabase";
 
 export const config = {
   runtime: "nodejs",

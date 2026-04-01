@@ -2,8 +2,8 @@ export const config = {
   runtime: "nodejs",
 };
 
-import { getAdminClient, requireAdmin, requireUser } from "./_supabase";
-import { requireEnvOrThrow, sendJsonError, withErrorHandler } from "./_withErrorHandler";
+import { getAdminClient, requireAdmin, requireUser } from "./supabase";
+import { requireEnvOrThrow, sendJsonError, withErrorHandler } from "./withErrorHandler";
 
 export default withErrorHandler(
   async (req, res) => {
@@ -41,4 +41,3 @@ export default withErrorHandler(
   },
   { route: "/api/staff" },
 );
-
