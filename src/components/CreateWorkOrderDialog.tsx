@@ -16,10 +16,7 @@ import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import type { WorkOrder } from "@/data/mockData";
-import { loadDrivers } from "@/lib/driversStorage";
-import { loadFleetTrucks } from "@/lib/fleetStorage";
-import { loadRoutes } from "@/lib/routesStorage";
+import type { Driver, Route, Truck, WorkOrder } from "@/data/mockData";
 
 import { Paperclip, FileText, ImageIcon } from "lucide-react";
 
@@ -42,15 +39,14 @@ export type CreateWorkOrderValues = z.infer<typeof createWorkOrderSchema>;
 type Props = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onCreate: (values: CreateWorkOrderValues) => void;
+  onCreate: (values: CreateWorkOrderValues) => void | Promise<void>;
   initialData?: WorkOrder;
+  drivers: Driver[];
+  trucks: Truck[];
+  routes: Route[];
 };
 
-export default function CreateWorkOrderDialog({ open, onOpenChange, onCreate, initialData }: Props) {
-  const drivers = loadDrivers();
-  const trucks = loadFleetTrucks();
-  const routes = loadRoutes();
-  
+export default function CreateWorkOrderDialog({ open, onOpenChange, onCreate, initialData, drivers, trucks, routes }: Props) {
   const [truckSearch, setTruckSearch] = useState("");
   const [driverSearch, setDriverSearch] = useState("");
   const [routeSearch, setRouteSearch] = useState("");
@@ -109,10 +105,6 @@ export default function CreateWorkOrderDialog({ open, onOpenChange, onCreate, in
       dueDate: initialData?.dueDate || new Date().toISOString().split("T")[0],
     },
   });
-
-  const onSubmit = (values: CreateWorkOrderValues) => {
-    onCreate(values);
-  };
 
   useEffect(() => {
     if (open) {
@@ -212,7 +204,12 @@ export default function CreateWorkOrderDialog({ open, onOpenChange, onCreate, in
         </DialogHeader>
 
         <Form {...form}>
-          <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+          <form
+            onSubmit={form.handleSubmit(async (values) => {
+              await onCreate(values);
+            })}
+            className="space-y-4"
+          >
             <FormField
               control={form.control}
               name="title"
@@ -450,10 +447,12 @@ export default function CreateWorkOrderDialog({ open, onOpenChange, onCreate, in
             />
 
             <DialogFooter className="pt-2">
-              <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+              <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={form.formState.isSubmitting}>
                 Cancel
               </Button>
-              <Button type="submit">{initialData ? "Save Changes" : "Create"}</Button>
+              <Button type="submit" disabled={form.formState.isSubmitting}>
+                {form.formState.isSubmitting ? "Saving…" : initialData ? "Save Changes" : "Create"}
+              </Button>
             </DialogFooter>
           </form>
         </Form>

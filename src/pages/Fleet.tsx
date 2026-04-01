@@ -151,11 +151,12 @@ export default function Fleet() {
     const legacyId = getNextTruckId(fleetTrucks);
     const today = new Date();
     const result = await apiFetchJson<{ success: boolean; truck: any }>(
-      "/api/fleet/create",
+      "/api/fleet",
       {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({
+          action: "create",
           legacyId,
           plateNumber: values.plateNumber.trim(),
           plateMonth: values.plateMonth,
@@ -171,7 +172,7 @@ export default function Fleet() {
           lng: 0,
         }),
       },
-      { label: "POST /api/fleet/create (Fleet)" },
+      { label: "POST /api/fleet (create) (Fleet)" },
     );
 
     if (result.ok === false) {
@@ -203,11 +204,12 @@ export default function Fleet() {
       }
 
       const result = await apiFetchJson<{ success: boolean; truck: any }>(
-        "/api/fleet/update",
+        "/api/fleet",
         {
           method: "POST",
           headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
           body: JSON.stringify({
+            action: "update",
             id: editingTruck.dbId,
             plateNumber: values.plateNumber.trim(),
             plateMonth: values.plateMonth,
@@ -217,7 +219,7 @@ export default function Fleet() {
             location: values.location.trim(),
           }),
         },
-        { label: "POST /api/fleet/update (Fleet)" },
+        { label: "POST /api/fleet (update) (Fleet)" },
       );
 
       if (result.ok === false) {

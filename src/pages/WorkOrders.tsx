@@ -1,9 +1,7 @@
-import { useMemo, useState } from "react";
-import { loadWorkOrders, saveWorkOrders, createWorkOrderId } from "@/lib/workOrdersStorage";
+import { useEffect, useMemo, useState } from "react";
+import { createWorkOrderId } from "@/lib/workOrdersStorage";
 import { loadRoutes } from "@/lib/routesStorage";
-import { loadFleetTrucks } from "@/lib/fleetStorage";
-import type { WorkOrder } from "@/data/mockData";
-import { loadDrivers } from "@/lib/driversStorage";
+import type { Driver, Truck, WorkOrder } from "@/data/mockData";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -12,6 +10,19 @@ import StatusBadge from "@/components/StatusBadge";
 import { cn } from "@/lib/utils";
 import { Filter, LayoutGrid, Plus, Table2 } from "lucide-react";
 import CreateWorkOrderDialog, { type CreateWorkOrderValues } from "@/components/CreateWorkOrderDialog";
+import { apiFetchJson } from "@/lib/apiFetch";
+import { useAuth } from "@/components/AuthProvider";
+import { toast } from "@/components/ui/sonner";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 const columns = [
   { key: "Pending", label: "Pending", color: "border-warning" },
@@ -38,13 +49,20 @@ const priorityColors: Record<string, string> = {
 };
 
 export default function WorkOrders() {
-  const [workOrderList, setWorkOrderList] = useState<WorkOrder[]>(() => loadWorkOrders());
-  const [createOpen, setCreateOpen] = useState(false);
-  const [editingWorkOrder, setEditingWorkOrder] = useState<WorkOrder | null>(null);
-  const [viewMode, setViewMode] = useState<"kanban" | "table">("kanban");
+  const { session, signOut } = useAuth();
+  const token = session?.access_token ?? "";
 
-  const drivers = useMemo(() => loadDrivers(), []);
-  const trucks = useMemo(() => loadFleetTrucks(), []);
+  const [workOrderList, setWorkOrderList] = useState<Array<WorkOrder & { dbId: string }>>([]);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [editingWorkOrder, setEditingWorkOrder] = useState<(WorkOrder & { dbId: string }) | null>(null);
+  const [viewMode, setViewMode] = useState<"kanban" | "table">("kanban");
+  const [loading, setLoading] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deletingWorkOrder, setDeletingWorkOrder] = useState<(WorkOrder & { dbId: string }) | null>(null);
+
+  const [drivers, setDrivers] = useState<Driver[]>([]);
+  const [trucks, setTrucks] = useState<Truck[]>([]);
+  const routes = useMemo(() => loadRoutes(), []);
   const getEmptyFilters = (): ColumnFilters => ({
     query: "",
     driverId: "all",
@@ -112,81 +130,227 @@ export default function WorkOrders() {
       });
   }, [workOrderList]);
 
-  const createWorkOrder = (values: CreateWorkOrderValues) => {
-    const id = createWorkOrderId(workOrderList);
-    
-    // We need to resolve the selected route to get pickup and destinations
-    const routes = loadRoutes();
-    const selectedRoute = routes.find(r => r.id === values.routeId);
-    
-    // Use the route name if available, otherwise fallback to the origin label
-    const routeName = selectedRoute?.name || selectedRoute?.origin?.label || "Unknown Route";
-    const destinations = selectedRoute?.destination?.label 
-      ? [selectedRoute.destination.label] 
-      : ["Unknown Destination"];
+  const loadDependencies = useMemo(() => {
+    return async () => {
+      if (!token) return;
+      try {
+        const [driversResult, fleetResult] = await Promise.all([
+          apiFetchJson<{ success: boolean; drivers: Array<any> }>(
+            "/api/drivers",
+            { headers: { Authorization: `Bearer ${token}` } },
+            { label: "GET /api/drivers (WorkOrders)" },
+          ),
+          apiFetchJson<{ success: boolean; trucks: Array<any> }>(
+            "/api/fleet",
+            { headers: { Authorization: `Bearer ${token}` } },
+            { label: "GET /api/fleet (WorkOrders)" },
+          ),
+        ]);
 
-    const next: WorkOrder = {
-      id,
-      title: values.title.trim(),
-      driverId: values.driverId,
-      truckId: values.truckId,
-      pickupLocation: routeName, // We store the route name here now to display it
-      destinations,
-      cargoType: values.notes || "No notes", // Use notes as cargoType for backward compatibility
-      priority: values.priority,
-      status: "Pending", // Default to Pending since we removed the selection
-      dueDate: values.dueDate,
-      createdAt: new Date().toISOString().split("T")[0],
+        if (driversResult.ok === false || fleetResult.ok === false) {
+          if (driversResult.ok === false && driversResult.status === 401) {
+            await signOut();
+          }
+          if (fleetResult.ok === false && fleetResult.status === 401) {
+            await signOut();
+          }
+          return;
+        }
+
+        const nextDrivers: Driver[] = (driversResult.data.drivers ?? []).map((d: any) => ({
+          id: String(d.legacy_id ?? d.legacyId ?? ""),
+          name: String(d.name ?? ""),
+          licenseType: String(d.license_type ?? ""),
+          licenseValidMonth: d.license_valid_month ?? undefined,
+          licenseValidYear: d.license_valid_year ?? undefined,
+          status: (String(d.status ?? "Active") as any) === "Inactive" ? "Inactive" : "Active",
+          phone: String(d.phone ?? ""),
+          rating: Number(d.rating ?? 0),
+          totalTrips: Number(d.total_trips ?? 0),
+          assignedTruck: null,
+          avatar: String(d.avatar ?? ""),
+        }));
+
+        const nextTrucks: Truck[] = (fleetResult.data.trucks ?? []).map((t: any) => ({
+          id: String(t.legacy_id ?? ""),
+          plateNumber: String(t.plate_number ?? ""),
+          plateMonth: t.plate_month ?? undefined,
+          plateYear: t.plate_year ?? undefined,
+          type: String(t.type ?? ""),
+          capacity: "—",
+          status: t.status,
+          assignedDrivers: [],
+          mileage: Number(t.mileage ?? 0),
+          fuelLevel: Number(t.fuel_level ?? 0),
+          lastService: String(t.last_service ?? ""),
+          nextService: String(t.next_service ?? ""),
+          lat: Number(t.lat ?? 0),
+          lng: Number(t.lng ?? 0),
+          location: String(t.location ?? ""),
+        }));
+
+        setDrivers(nextDrivers);
+        setTrucks(nextTrucks);
+      } catch {
+        return;
+      }
     };
+  }, [token]);
 
-    setWorkOrderList((prev) => {
-      const updated = [next, ...prev];
-      saveWorkOrders(updated);
-      return updated;
-    });
+  const loadWorkOrdersFromApi = useMemo(() => {
+    return async () => {
+      if (!token) return;
+      setLoading(true);
+      try {
+        const result = await apiFetchJson<{ success: boolean; workOrders: Array<any> }>(
+          "/api/work-orders",
+          { headers: { Authorization: `Bearer ${token}` } },
+          { label: "GET /api/work-orders (WorkOrders)" },
+        );
+        if (result.ok === false) {
+          if (result.status === 401) {
+            await signOut();
+          }
+          toast.error("Failed to load work orders", { description: result.error });
+          setWorkOrderList([]);
+          setLoading(false);
+          return;
+        }
+
+        setWorkOrderList(result.data.workOrders ?? []);
+        setLoading(false);
+      } catch (e) {
+        toast.error("Failed to load work orders", { description: e instanceof Error ? e.message : "Unknown error" });
+        setWorkOrderList([]);
+        setLoading(false);
+      }
+    };
+  }, [token]);
+
+  useEffect(() => {
+    void loadDependencies();
+    void loadWorkOrdersFromApi();
+  }, [loadDependencies, loadWorkOrdersFromApi]);
+
+  const createWorkOrder = async (values: CreateWorkOrderValues) => {
+    if (!token) return;
+    const id = createWorkOrderId(workOrderList);
+
+    const selectedRoute = routes.find((r) => r.id === values.routeId);
+    const routeName = selectedRoute?.name || selectedRoute?.origin?.label || "Unknown Route";
+    const destinations = selectedRoute?.destination?.label ? [selectedRoute.destination.label] : ["Unknown Destination"];
+
+    const result = await apiFetchJson<{ success: boolean }>(
+      "/api/work-orders",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          action: "create",
+          legacyId: id,
+          title: values.title.trim(),
+          driverId: values.driverId,
+          truckId: values.truckId,
+          routeName,
+          destinations,
+          notes: values.notes || "",
+          priority: values.priority,
+          dueDate: values.dueDate,
+        }),
+      },
+      { label: "POST /api/work-orders (create) (WorkOrders)" },
+    );
+
+    if (result.ok === false) {
+      if (result.status === 401) {
+        await signOut();
+      }
+      toast.error("Failed to create work order", { description: result.error });
+      return;
+    }
+
+    toast.success("Work order created", { description: id });
     setCreateOpen(false);
+    await loadWorkOrdersFromApi();
   };
 
   const updateWorkOrder = (values: CreateWorkOrderValues & { _newHistory?: WorkOrder["history"] }) => {
     if (!editingWorkOrder) return;
+    void (async () => {
+      if (!token) return;
 
-    const routes = loadRoutes();
-    const selectedRoute = routes.find(r => r.id === values.routeId);
-    
-    const routeName = selectedRoute?.name || selectedRoute?.origin?.label || "Unknown Route";
-    const destinations = selectedRoute?.destination?.label 
-      ? [selectedRoute.destination.label] 
-      : ["Unknown Destination"];
+      if (values._newHistory && values._newHistory.length > (editingWorkOrder.history?.length ?? 0)) {
+        const entry = values._newHistory[values._newHistory.length - 1];
+        const result = await apiFetchJson<{ success: boolean }>(
+          "/api/work-orders",
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+            body: JSON.stringify({
+              action: "addHistory",
+              id: editingWorkOrder.dbId,
+              message: entry.message,
+              attachmentName: entry.attachment?.name,
+              attachmentUrl: entry.attachment?.url,
+            }),
+          },
+          { label: "POST /api/work-orders (addHistory) (WorkOrders)" },
+        );
+        if (result.ok === false) {
+          if (result.status === 401) {
+            await signOut();
+          }
+          toast.error("Failed to add history", { description: result.error });
+          return;
+        }
 
-    setWorkOrderList((prev) => {
-      const updated = prev.map(wo => {
-        if (wo.id === editingWorkOrder.id) {
-          return {
-            ...wo,
+        await loadWorkOrdersFromApi();
+        setEditingWorkOrder((prev) => {
+          if (!prev) return prev;
+          const updated = workOrderList.find((w) => w.dbId === prev.dbId);
+          return updated ?? prev;
+        });
+        return;
+      }
+
+      const selectedRoute = routes.find((r) => r.id === values.routeId);
+      const routeName = selectedRoute?.name || selectedRoute?.origin?.label || "Unknown Route";
+      const destinations = selectedRoute?.destination?.label ? [selectedRoute.destination.label] : ["Unknown Destination"];
+
+      const result = await apiFetchJson<{ success: boolean }>(
+        "/api/work-orders",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+          body: JSON.stringify({
+            action: "update",
+            id: editingWorkOrder.dbId,
             title: values.title.trim(),
             driverId: values.driverId,
             truckId: values.truckId,
-            pickupLocation: routeName,
+            routeName,
             destinations,
-            cargoType: values.notes || "No notes",
+            notes: values.notes || "",
             priority: values.priority,
-            status: values.status || wo.status,
+            status: values.status || editingWorkOrder.status,
             dueDate: values.dueDate,
-            history: values._newHistory || wo.history,
-          };
+          }),
+        },
+        { label: "POST /api/work-orders (update) (WorkOrders)" },
+      );
+
+      if (result.ok === false) {
+        if (result.status === 401) {
+          await signOut();
         }
-        return wo;
-      });
-      saveWorkOrders(updated);
-      
-      // Update local state so it reflects immediately without closing the dialog
-      if (values._newHistory) {
-        setEditingWorkOrder(updated.find(w => w.id === editingWorkOrder.id) || null);
-      } else {
-        setEditingWorkOrder(null);
+        toast.error("Failed to update work order", { description: result.error });
+        return;
       }
-      return updated;
-    });
+
+      toast.success("Work order updated", { description: editingWorkOrder.id });
+      setEditingWorkOrder(null);
+      await loadWorkOrdersFromApi();
+    })();
   };
 
   const matchesFilters = (colKey: ColumnKey, order: WorkOrder) => {
@@ -251,7 +415,14 @@ export default function WorkOrders() {
         </div>
       </div>
 
-      <CreateWorkOrderDialog open={createOpen} onOpenChange={setCreateOpen} onCreate={createWorkOrder} />
+      <CreateWorkOrderDialog
+        open={createOpen}
+        onOpenChange={setCreateOpen}
+        onCreate={createWorkOrder}
+        drivers={drivers}
+        trucks={trucks}
+        routes={routes}
+      />
       
       {editingWorkOrder && (
         <CreateWorkOrderDialog 
@@ -261,6 +432,9 @@ export default function WorkOrders() {
           }} 
           onCreate={updateWorkOrder} 
           initialData={editingWorkOrder}
+          drivers={drivers}
+          trucks={trucks}
+          routes={routes}
         />
       )}
 
@@ -277,35 +451,62 @@ export default function WorkOrders() {
                 <TableHead>Priority</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead className="text-right">Due Date</TableHead>
+                <TableHead className="text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {sortedForTable.map((order) => {
-                const driver = drivers.find((d) => d.id === order.driverId);
-                const truck = trucks.find((t) => t.id === order.truckId);
-                return (
-                  <TableRow
-                    key={order.id}
-                    className="cursor-pointer"
-                    onClick={() => setEditingWorkOrder(order)}
-                  >
-                    <TableCell className="font-mono text-xs text-muted-foreground whitespace-nowrap">{order.id}</TableCell>
-                    <TableCell className="font-medium max-w-[280px] truncate">{order.title}</TableCell>
-                    <TableCell className="max-w-[260px] truncate">{order.pickupLocation}</TableCell>
-                    <TableCell className="max-w-[220px] truncate">{driver?.name ?? "—"}</TableCell>
-                    <TableCell className="whitespace-nowrap">{truck?.plateNumber ?? order.truckId}</TableCell>
-                    <TableCell className={cn("font-semibold", priorityColors[order.priority])}>{order.priority}</TableCell>
-                    <TableCell>
-                      <StatusBadge status={order.status} />
-                    </TableCell>
-                    <TableCell className="text-right whitespace-nowrap">{order.dueDate || "—"}</TableCell>
-                  </TableRow>
-                );
-              })}
+              {sortedForTable.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={9} className="py-10 text-center text-sm text-muted-foreground">
+                    {loading ? "Loading…" : "No work orders yet. Click Add to create your first work order."}
+                  </TableCell>
+                </TableRow>
+              ) : (
+                sortedForTable.map((order) => {
+                  const driver = drivers.find((d) => d.id === order.driverId);
+                  const truck = trucks.find((t) => t.id === order.truckId);
+                  return (
+                    <TableRow
+                      key={order.dbId}
+                      className="cursor-pointer"
+                      onClick={() => setEditingWorkOrder(order)}
+                    >
+                      <TableCell className="font-mono text-xs text-muted-foreground whitespace-nowrap">{order.id}</TableCell>
+                      <TableCell className="font-medium max-w-[280px] truncate">{order.title}</TableCell>
+                      <TableCell className="max-w-[260px] truncate">{order.pickupLocation}</TableCell>
+                      <TableCell className="max-w-[220px] truncate">{driver?.name ?? "—"}</TableCell>
+                      <TableCell className="whitespace-nowrap">{truck?.plateNumber ?? order.truckId}</TableCell>
+                      <TableCell className={cn("font-semibold", priorityColors[order.priority])}>{order.priority}</TableCell>
+                      <TableCell>
+                        <StatusBadge status={order.status} />
+                      </TableCell>
+                      <TableCell className="text-right whitespace-nowrap">{order.dueDate || "—"}</TableCell>
+                      <TableCell className="text-right">
+                        <Button
+                          variant="destructive"
+                          size="sm"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setDeletingWorkOrder(order);
+                            setDeleteOpen(true);
+                          }}
+                        >
+                          Delete
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })
+              )}
             </TableBody>
           </Table>
         </div>
       ) : (
+        workOrderList.length === 0 ? (
+          <div className="bg-card border border-border rounded-xl p-8 text-center text-sm text-muted-foreground">
+            {loading ? "Loading…" : "No work orders yet. Click Add to create your first work order."}
+          </div>
+        ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
           {columns.map(col => {
           const orders = workOrderList
@@ -429,7 +630,57 @@ export default function WorkOrders() {
           );
           })}
         </div>
+        )
       )}
+
+      <AlertDialog
+        open={deleteOpen}
+        onOpenChange={(open) => {
+          setDeleteOpen(open);
+          if (!open) {
+            setDeletingWorkOrder(null);
+          }
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete work order</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will permanently delete {deletingWorkOrder?.id ?? "this work order"}.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={async () => {
+                if (!deletingWorkOrder || !token) return;
+                const result = await apiFetchJson<{ success: boolean }>(
+                  "/api/work-orders",
+                  {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+                    body: JSON.stringify({ action: "delete", id: deletingWorkOrder.dbId }),
+                  },
+                  { label: "POST /api/work-orders (delete) (WorkOrders)" },
+                );
+                if (result.ok === false) {
+                  if (result.status === 401) {
+                    await signOut();
+                  }
+                  toast.error("Failed to delete work order", { description: result.error });
+                  return;
+                }
+                toast.success("Work order deleted", { description: deletingWorkOrder.id });
+                setDeleteOpen(false);
+                setDeletingWorkOrder(null);
+                await loadWorkOrdersFromApi();
+              }}
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

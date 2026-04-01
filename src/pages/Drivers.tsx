@@ -144,11 +144,12 @@ export default function Drivers() {
     const name = values.name.trim();
 
     const result = await apiFetchJson<{ success: boolean; driver: any }>(
-      "/api/drivers/create",
+      "/api/drivers",
       {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({
+          action: "create",
           legacyId,
           name,
           licenseType: values.licenseType.trim(),
@@ -161,7 +162,7 @@ export default function Drivers() {
           avatar: avatar || "DR",
         }),
       },
-      { label: "POST /api/drivers/create (Drivers)" },
+      { label: "POST /api/drivers (create) (Drivers)" },
     );
 
     if (result.ok === false) {
@@ -192,11 +193,12 @@ export default function Drivers() {
       const name = values.name.trim();
 
       const result = await apiFetchJson<{ success: boolean; driver: any }>(
-        "/api/drivers/update",
+        "/api/drivers",
         {
           method: "POST",
           headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
           body: JSON.stringify({
+            action: "update",
             id: editingDriver.dbId,
             name,
             licenseType: values.licenseType.trim(),
@@ -207,7 +209,7 @@ export default function Drivers() {
             avatar: avatar || editingDriver.avatar,
           }),
         },
-        { label: "POST /api/drivers/update (Drivers)" },
+        { label: "POST /api/drivers (update) (Drivers)" },
       );
 
       if (result.ok === false) {
@@ -471,13 +473,13 @@ export default function Drivers() {
               onClick={async () => {
                 if (!deletingDriver || !token) return;
                 const result = await apiFetchJson<{ success: boolean }>(
-                  "/api/drivers/delete",
+                  "/api/drivers",
                   {
                     method: "POST",
                     headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-                    body: JSON.stringify({ id: deletingDriver.dbId }),
+                    body: JSON.stringify({ action: "delete", id: deletingDriver.dbId }),
                   },
-                  { label: "POST /api/drivers/delete (Drivers)" },
+                  { label: "POST /api/drivers (delete) (Drivers)" },
                 );
                 if (result.ok === false) {
                   if (result.status === 401) {

@@ -579,6 +579,109 @@ app.get("/api/fleet", async (req, res) => {
   return res.status(200).json({ success: true, trucks: data ?? [] });
 });
 
+app.post("/api/fleet", async (req, res) => {
+  const auth = await requireUser(req);
+  if (!auth.ok) {
+    return res.status(auth.status).json({ error: auth.error });
+  }
+
+  const admin = await requireAdmin(auth.user);
+  if (!admin.ok) {
+    return res.status(403).json({ error: admin.error });
+  }
+
+  const bodySchema = z.discriminatedUnion("action", [
+    z.object({
+      action: z.literal("create"),
+      legacyId: z.string().min(1),
+      plateNumber: z.string().min(3),
+      plateMonth: z.string().optional(),
+      plateYear: z.string().optional(),
+      type: z.string().min(1),
+      status: z.string().min(1),
+      location: z.string().optional(),
+      mileage: z.number().optional(),
+      fuelLevel: z.number().optional(),
+      lastService: z.string().optional(),
+      nextService: z.string().optional(),
+      lat: z.number().optional(),
+      lng: z.number().optional(),
+    }),
+    z.object({
+      action: z.literal("update"),
+      id: z.string().min(1),
+      plateNumber: z.string().min(3),
+      plateMonth: z.string().optional(),
+      plateYear: z.string().optional(),
+      type: z.string().min(1),
+      status: z.string().min(1),
+      location: z.string().optional(),
+    }),
+  ]);
+
+  let parsed: z.infer<typeof bodySchema>;
+  try {
+    parsed = bodySchema.parse(req.body);
+  } catch (e) {
+    const message = e instanceof Error ? e.message : "Invalid request";
+    return res.status(400).json({ error: message });
+  }
+
+  const url = getSupabaseUrl();
+  const serviceRole = getSupabaseServiceRoleKey();
+  if (!url || !serviceRole) {
+    return res.status(500).json({ error: "Supabase env not configured" });
+  }
+
+  const supabaseAdmin = createClient(url, serviceRole, { auth: { persistSession: false, autoRefreshToken: false } });
+
+  if (parsed.action === "create") {
+    const { data, error } = await supabaseAdmin
+      .from("fleet_trucks")
+      .insert({
+        user_id: auth.user.id,
+        legacy_id: parsed.legacyId,
+        plate_number: parsed.plateNumber,
+        plate_month: parsed.plateMonth ?? null,
+        plate_year: parsed.plateYear ?? null,
+        type: parsed.type,
+        status: parsed.status,
+        location: parsed.location ?? null,
+        mileage: parsed.mileage ?? 0,
+        fuel_level: parsed.fuelLevel ?? 0,
+        last_service: parsed.lastService ?? null,
+        next_service: parsed.nextService ?? null,
+        lat: parsed.lat ?? null,
+        lng: parsed.lng ?? null,
+      })
+      .select("id,legacy_id,plate_number,plate_month,plate_year,type,status,location,mileage,fuel_level,last_service,next_service,lat,lng,created_at")
+      .single();
+    if (error) {
+      return res.status(400).json({ error: error.message });
+    }
+    return res.status(200).json({ success: true, truck: data });
+  }
+
+  const { data, error } = await supabaseAdmin
+    .from("fleet_trucks")
+    .update({
+      plate_number: parsed.plateNumber,
+      plate_month: parsed.plateMonth ?? null,
+      plate_year: parsed.plateYear ?? null,
+      type: parsed.type,
+      status: parsed.status,
+      location: parsed.location ?? null,
+    })
+    .eq("id", parsed.id)
+    .eq("user_id", auth.user.id)
+    .select("id,legacy_id,plate_number,plate_month,plate_year,type,status,location,mileage,fuel_level,last_service,next_service,lat,lng,created_at")
+    .single();
+  if (error) {
+    return res.status(400).json({ error: error.message });
+  }
+  return res.status(200).json({ success: true, truck: data });
+});
+
 app.post("/api/fleet/create", async (req, res) => {
   const auth = await requireUser(req);
   if (!auth.ok) {
@@ -718,6 +821,117 @@ app.get("/api/drivers", async (req, res) => {
   }
 
   return res.status(200).json({ success: true, drivers: data ?? [] });
+});
+
+app.post("/api/drivers", async (req, res) => {
+  const auth = await requireUser(req);
+  if (!auth.ok) {
+    return res.status(auth.status).json({ error: auth.error });
+  }
+
+  const admin = await requireAdmin(auth.user);
+  if (!admin.ok) {
+    return res.status(403).json({ error: admin.error });
+  }
+
+  const bodySchema = z.discriminatedUnion("action", [
+    z.object({
+      action: z.literal("create"),
+      legacyId: z.string().min(1),
+      name: z.string().min(1),
+      licenseType: z.string().min(1),
+      licenseValidMonth: z.string().optional(),
+      licenseValidYear: z.string().optional(),
+      status: z.enum(["Active", "Inactive"]),
+      phone: z.string().optional(),
+      rating: z.number().optional(),
+      totalTrips: z.number().optional(),
+      avatar: z.string().optional(),
+    }),
+    z.object({
+      action: z.literal("update"),
+      id: z.string().min(1),
+      name: z.string().min(1),
+      licenseType: z.string().min(1),
+      licenseValidMonth: z.string().optional(),
+      licenseValidYear: z.string().optional(),
+      status: z.enum(["Active", "Inactive"]),
+      phone: z.string().optional(),
+      avatar: z.string().optional(),
+    }),
+    z.object({
+      action: z.literal("delete"),
+      id: z.string().min(1),
+    }),
+  ]);
+
+  let parsed: z.infer<typeof bodySchema>;
+  try {
+    parsed = bodySchema.parse(req.body);
+  } catch (e) {
+    const message = e instanceof Error ? e.message : "Invalid request";
+    return res.status(400).json({ error: message });
+  }
+
+  const url = getSupabaseUrl();
+  const serviceRole = getSupabaseServiceRoleKey();
+  if (!url || !serviceRole) {
+    return res.status(500).json({ error: "Supabase env not configured" });
+  }
+
+  const supabaseAdmin = createClient(url, serviceRole, { auth: { persistSession: false, autoRefreshToken: false } });
+
+  if (parsed.action === "delete") {
+    const { error } = await supabaseAdmin.from("drivers").delete().eq("id", parsed.id).eq("user_id", auth.user.id);
+    if (error) {
+      return res.status(400).json({ error: error.message });
+    }
+    return res.status(200).json({ success: true });
+  }
+
+  if (parsed.action === "create") {
+    const { data, error } = await supabaseAdmin
+      .from("drivers")
+      .insert({
+        user_id: auth.user.id,
+        legacy_id: parsed.legacyId,
+        name: parsed.name,
+        license_type: parsed.licenseType,
+        license_valid_month: parsed.licenseValidMonth ?? null,
+        license_valid_year: parsed.licenseValidYear ?? null,
+        status: parsed.status,
+        phone: parsed.phone ?? null,
+        rating: parsed.rating ?? 0,
+        total_trips: parsed.totalTrips ?? 0,
+        avatar: parsed.avatar ?? null,
+      })
+      .select("id,legacy_id,name,license_type,license_valid_month,license_valid_year,status,phone,rating,total_trips,avatar,created_at")
+      .single();
+    if (error) {
+      return res.status(400).json({ error: error.message });
+    }
+    return res.status(200).json({ success: true, driver: data });
+  }
+
+  const { data, error } = await supabaseAdmin
+    .from("drivers")
+    .update({
+      name: parsed.name,
+      license_type: parsed.licenseType,
+      license_valid_month: parsed.licenseValidMonth ?? null,
+      license_valid_year: parsed.licenseValidYear ?? null,
+      status: parsed.status,
+      phone: parsed.phone ?? null,
+      avatar: parsed.avatar ?? null,
+    })
+    .eq("id", parsed.id)
+    .eq("user_id", auth.user.id)
+    .select("id,legacy_id,name,license_type,license_valid_month,license_valid_year,status,phone,rating,total_trips,avatar,created_at")
+    .single();
+  if (error) {
+    return res.status(400).json({ error: error.message });
+  }
+  return res.status(200).json({ success: true, driver: data });
 });
 
 app.post("/api/drivers/create", async (req, res) => {
@@ -875,6 +1089,240 @@ app.post("/api/drivers/delete", async (req, res) => {
   }
 
   return res.status(200).json({ success: true });
+});
+
+app.get("/api/work-orders", async (req, res) => {
+  const auth = await requireUser(req);
+  if (!auth.ok) {
+    return res.status(auth.status).json({ error: auth.error });
+  }
+
+  const url = getSupabaseUrl();
+  const serviceRole = getSupabaseServiceRoleKey();
+  if (!url || !serviceRole) {
+    return res.status(500).json({ error: "Supabase env not configured" });
+  }
+
+  const supabaseAdmin = createClient(url, serviceRole, { auth: { persistSession: false, autoRefreshToken: false } });
+
+  const workOrderSelect =
+    "id,legacy_id,title,driver_id,truck_id,route_name,destinations,notes,priority,status,due_date,created_at,updated_at";
+  const { data: orders, error } = await supabaseAdmin
+    .from("work_orders")
+    .select(workOrderSelect)
+    .eq("user_id", auth.user.id)
+    .order("created_at", { ascending: false });
+  if (error) {
+    return res.status(500).json({ error: error.message });
+  }
+
+  const orderIds = (orders ?? []).map((o: any) => String(o.id));
+  const historyByOrderId = new Map<string, any[]>();
+  if (orderIds.length > 0) {
+    const { data: historyRows } = await supabaseAdmin
+      .from("work_order_history")
+      .select("id,work_order_id,message,attachment_name,attachment_url,created_at")
+      .in("work_order_id", orderIds)
+      .order("created_at", { ascending: true });
+    for (const h of historyRows ?? []) {
+      const key = String((h as any).work_order_id);
+      const list = historyByOrderId.get(key) ?? [];
+      list.push(h);
+      historyByOrderId.set(key, list);
+    }
+  }
+
+  const driverIds = Array.from(new Set((orders ?? []).map((o: any) => String(o.driver_id)).filter(Boolean)));
+  const truckIds = Array.from(new Set((orders ?? []).map((o: any) => String(o.truck_id)).filter(Boolean)));
+  const driverLegacyById = new Map<string, string>();
+  const truckLegacyById = new Map<string, string>();
+
+  if (driverIds.length > 0) {
+    const { data: driverRows } = await supabaseAdmin.from("drivers").select("id,legacy_id").in("id", driverIds);
+    for (const d of driverRows ?? []) {
+      driverLegacyById.set(String((d as any).id), String((d as any).legacy_id ?? ""));
+    }
+  }
+  if (truckIds.length > 0) {
+    const { data: truckRows } = await supabaseAdmin.from("fleet_trucks").select("id,legacy_id").in("id", truckIds);
+    for (const t of truckRows ?? []) {
+      truckLegacyById.set(String((t as any).id), String((t as any).legacy_id ?? ""));
+    }
+  }
+
+  const mapped = (orders ?? []).map((o: any) => {
+    const id = String(o.id);
+    const history = (historyByOrderId.get(id) ?? []).map((h: any) => ({
+      id: String(h.id),
+      timestamp: String(h.created_at),
+      message: String(h.message ?? ""),
+      attachment:
+        h.attachment_name && h.attachment_url
+          ? { name: String(h.attachment_name), url: String(h.attachment_url) }
+          : h.attachment_name
+            ? { name: String(h.attachment_name), url: "" }
+            : undefined,
+    }));
+
+    const destinations = Array.isArray(o.destinations) ? o.destinations : (o.destinations?.destinations ?? o.destinations ?? []);
+    return {
+      dbId: id,
+      id: String(o.legacy_id ?? ""),
+      title: String(o.title ?? ""),
+      driverId: driverLegacyById.get(String(o.driver_id)) ?? "",
+      truckId: truckLegacyById.get(String(o.truck_id)) ?? "",
+      pickupLocation: String(o.route_name ?? ""),
+      destinations: Array.isArray(destinations) ? destinations.map(String) : [],
+      cargoType: String(o.notes ?? ""),
+      priority: String(o.priority ?? "Medium"),
+      status: String(o.status ?? "Pending"),
+      createdAt: String(o.created_at ?? "").slice(0, 10),
+      dueDate: String(o.due_date ?? ""),
+      history,
+    };
+  });
+
+  return res.status(200).json({ success: true, workOrders: mapped });
+});
+
+app.post("/api/work-orders", async (req, res) => {
+  const auth = await requireUser(req);
+  if (!auth.ok) {
+    return res.status(auth.status).json({ error: auth.error });
+  }
+
+  const admin = await requireAdmin(auth.user);
+  if (!admin.ok) {
+    return res.status(403).json({ error: admin.error });
+  }
+
+  const bodySchema = z.discriminatedUnion("action", [
+    z.object({
+      action: z.literal("create"),
+      legacyId: z.string().min(1),
+      title: z.string().min(1),
+      driverId: z.string().min(1),
+      truckId: z.string().min(1),
+      routeName: z.string().min(1),
+      destinations: z.array(z.string()).default([]),
+      notes: z.string().optional(),
+      priority: z.enum(["High", "Medium", "Low"]),
+      dueDate: z.string().min(1),
+    }),
+    z.object({
+      action: z.literal("update"),
+      id: z.string().min(1),
+      title: z.string().min(1),
+      driverId: z.string().min(1),
+      truckId: z.string().min(1),
+      routeName: z.string().min(1),
+      destinations: z.array(z.string()).default([]),
+      notes: z.string().optional(),
+      priority: z.enum(["High", "Medium", "Low"]),
+      status: z.enum(["Pending", "In Progress", "Completed", "Cancelled"]),
+      dueDate: z.string().min(1),
+    }),
+    z.object({
+      action: z.literal("delete"),
+      id: z.string().min(1),
+    }),
+    z.object({
+      action: z.literal("addHistory"),
+      id: z.string().min(1),
+      message: z.string().optional(),
+      attachmentName: z.string().optional(),
+      attachmentUrl: z.string().optional(),
+    }),
+  ]);
+
+  let parsed: z.infer<typeof bodySchema>;
+  try {
+    parsed = bodySchema.parse(req.body);
+  } catch (e) {
+    const message = e instanceof Error ? e.message : "Invalid request";
+    return res.status(400).json({ error: message });
+  }
+
+  const url = getSupabaseUrl();
+  const serviceRole = getSupabaseServiceRoleKey();
+  if (!url || !serviceRole) {
+    return res.status(500).json({ error: "Supabase env not configured" });
+  }
+
+  const supabaseAdmin = createClient(url, serviceRole, { auth: { persistSession: false, autoRefreshToken: false } });
+
+  if (parsed.action === "delete") {
+    const { error } = await supabaseAdmin.from("work_orders").delete().eq("id", parsed.id).eq("user_id", auth.user.id);
+    if (error) return res.status(400).json({ error: error.message });
+    return res.status(200).json({ success: true });
+  }
+
+  if (parsed.action === "addHistory") {
+    const { error } = await supabaseAdmin.from("work_order_history").insert({
+      work_order_id: parsed.id,
+      message: parsed.message ?? "",
+      attachment_name: parsed.attachmentName ?? null,
+      attachment_url: parsed.attachmentUrl ?? null,
+    });
+    if (error) return res.status(400).json({ error: error.message });
+    return res.status(200).json({ success: true });
+  }
+
+  const { data: driverRow } = await supabaseAdmin
+    .from("drivers")
+    .select("id")
+    .eq("user_id", auth.user.id)
+    .eq("legacy_id", parsed.driverId)
+    .maybeSingle();
+  if (!driverRow) return res.status(400).json({ error: "Invalid driver" });
+
+  const { data: truckRow } = await supabaseAdmin
+    .from("fleet_trucks")
+    .select("id")
+    .eq("user_id", auth.user.id)
+    .eq("legacy_id", parsed.truckId)
+    .maybeSingle();
+  if (!truckRow) return res.status(400).json({ error: "Invalid truck" });
+
+  if (parsed.action === "create") {
+    const { data, error } = await supabaseAdmin
+      .from("work_orders")
+      .insert({
+        user_id: auth.user.id,
+        legacy_id: parsed.legacyId,
+        title: parsed.title,
+        driver_id: (driverRow as any).id,
+        truck_id: (truckRow as any).id,
+        route_name: parsed.routeName,
+        destinations: parsed.destinations,
+        notes: parsed.notes ?? null,
+        priority: parsed.priority,
+        status: "Pending",
+        due_date: parsed.dueDate,
+      })
+      .single();
+    if (error) return res.status(400).json({ error: error.message });
+    return res.status(200).json({ success: true, workOrder: data });
+  }
+
+  const { data, error } = await supabaseAdmin
+    .from("work_orders")
+    .update({
+      title: parsed.title,
+      driver_id: (driverRow as any).id,
+      truck_id: (truckRow as any).id,
+      route_name: parsed.routeName,
+      destinations: parsed.destinations,
+      notes: parsed.notes ?? null,
+      priority: parsed.priority,
+      status: parsed.status,
+      due_date: parsed.dueDate,
+    })
+    .eq("id", parsed.id)
+    .eq("user_id", auth.user.id)
+    .single();
+  if (error) return res.status(400).json({ error: error.message });
+  return res.status(200).json({ success: true, workOrder: data });
 });
 
 app.get("/api/places", async (req, res) => {

@@ -1,27 +1,26 @@
 import type { WorkOrder } from "@/data/mockData";
-import { workOrders as mockWorkOrders } from "@/data/mockData";
 
 const STORAGE_KEY = "transportmer.fleet.workorders.v1";
 
 export function loadWorkOrders(): WorkOrder[] {
   if (typeof window === "undefined") {
-    return mockWorkOrders;
+    return [];
   }
 
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY);
     if (!raw) {
-      return mockWorkOrders;
+      return [];
     }
 
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) {
-      return mockWorkOrders;
+      return [];
     }
 
     return parsed as WorkOrder[];
   } catch {
-    return mockWorkOrders;
+    return [];
   }
 }
 
