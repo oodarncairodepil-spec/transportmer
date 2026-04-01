@@ -695,6 +695,188 @@ app.post("/api/fleet/update", async (req, res) => {
   return res.status(200).json({ success: true, truck: data });
 });
 
+app.get("/api/drivers", async (req, res) => {
+  const auth = await requireUser(req);
+  if (!auth.ok) {
+    return res.status(auth.status).json({ error: auth.error });
+  }
+
+  const url = getSupabaseUrl();
+  const serviceRole = getSupabaseServiceRoleKey();
+  if (!url || !serviceRole) {
+    return res.status(500).json({ error: "Supabase env not configured" });
+  }
+
+  const supabaseAdmin = createClient(url, serviceRole, { auth: { persistSession: false, autoRefreshToken: false } });
+  const { data, error } = await supabaseAdmin
+    .from("drivers")
+    .select("id,legacy_id,name,license_type,license_valid_month,license_valid_year,status,phone,rating,total_trips,avatar,created_at")
+    .eq("user_id", auth.user.id)
+    .order("created_at", { ascending: false });
+  if (error) {
+    return res.status(500).json({ error: error.message });
+  }
+
+  return res.status(200).json({ success: true, drivers: data ?? [] });
+});
+
+app.post("/api/drivers/create", async (req, res) => {
+  const auth = await requireUser(req);
+  if (!auth.ok) {
+    return res.status(auth.status).json({ error: auth.error });
+  }
+
+  const admin = await requireAdmin(auth.user);
+  if (!admin.ok) {
+    return res.status(403).json({ error: admin.error });
+  }
+
+  const bodySchema = z.object({
+    legacyId: z.string().min(1),
+    name: z.string().min(1),
+    licenseType: z.string().min(1),
+    licenseValidMonth: z.string().optional(),
+    licenseValidYear: z.string().optional(),
+    status: z.enum(["Active", "Inactive"]),
+    phone: z.string().optional(),
+    rating: z.number().optional(),
+    totalTrips: z.number().optional(),
+    avatar: z.string().optional(),
+  });
+
+  let parsed: z.infer<typeof bodySchema>;
+  try {
+    parsed = bodySchema.parse(req.body);
+  } catch (e) {
+    const message = e instanceof Error ? e.message : "Invalid request";
+    return res.status(400).json({ error: message });
+  }
+
+  const url = getSupabaseUrl();
+  const serviceRole = getSupabaseServiceRoleKey();
+  if (!url || !serviceRole) {
+    return res.status(500).json({ error: "Supabase env not configured" });
+  }
+
+  const supabaseAdmin = createClient(url, serviceRole, { auth: { persistSession: false, autoRefreshToken: false } });
+  const { data, error } = await supabaseAdmin
+    .from("drivers")
+    .insert({
+      user_id: auth.user.id,
+      legacy_id: parsed.legacyId,
+      name: parsed.name,
+      license_type: parsed.licenseType,
+      license_valid_month: parsed.licenseValidMonth ?? null,
+      license_valid_year: parsed.licenseValidYear ?? null,
+      status: parsed.status,
+      phone: parsed.phone ?? null,
+      rating: parsed.rating ?? 0,
+      total_trips: parsed.totalTrips ?? 0,
+      avatar: parsed.avatar ?? null,
+    })
+    .select("id,legacy_id,name,license_type,license_valid_month,license_valid_year,status,phone,rating,total_trips,avatar,created_at")
+    .single();
+  if (error) {
+    return res.status(400).json({ error: error.message });
+  }
+
+  return res.status(200).json({ success: true, driver: data });
+});
+
+app.post("/api/drivers/update", async (req, res) => {
+  const auth = await requireUser(req);
+  if (!auth.ok) {
+    return res.status(auth.status).json({ error: auth.error });
+  }
+
+  const admin = await requireAdmin(auth.user);
+  if (!admin.ok) {
+    return res.status(403).json({ error: admin.error });
+  }
+
+  const bodySchema = z.object({
+    id: z.string().min(1),
+    name: z.string().min(1),
+    licenseType: z.string().min(1),
+    licenseValidMonth: z.string().optional(),
+    licenseValidYear: z.string().optional(),
+    status: z.enum(["Active", "Inactive"]),
+    phone: z.string().optional(),
+    avatar: z.string().optional(),
+  });
+
+  let parsed: z.infer<typeof bodySchema>;
+  try {
+    parsed = bodySchema.parse(req.body);
+  } catch (e) {
+    const message = e instanceof Error ? e.message : "Invalid request";
+    return res.status(400).json({ error: message });
+  }
+
+  const url = getSupabaseUrl();
+  const serviceRole = getSupabaseServiceRoleKey();
+  if (!url || !serviceRole) {
+    return res.status(500).json({ error: "Supabase env not configured" });
+  }
+
+  const supabaseAdmin = createClient(url, serviceRole, { auth: { persistSession: false, autoRefreshToken: false } });
+  const { data, error } = await supabaseAdmin
+    .from("drivers")
+    .update({
+      name: parsed.name,
+      license_type: parsed.licenseType,
+      license_valid_month: parsed.licenseValidMonth ?? null,
+      license_valid_year: parsed.licenseValidYear ?? null,
+      status: parsed.status,
+      phone: parsed.phone ?? null,
+      avatar: parsed.avatar ?? null,
+    })
+    .eq("id", parsed.id)
+    .eq("user_id", auth.user.id)
+    .select("id,legacy_id,name,license_type,license_valid_month,license_valid_year,status,phone,rating,total_trips,avatar,created_at")
+    .single();
+  if (error) {
+    return res.status(400).json({ error: error.message });
+  }
+
+  return res.status(200).json({ success: true, driver: data });
+});
+
+app.post("/api/drivers/delete", async (req, res) => {
+  const auth = await requireUser(req);
+  if (!auth.ok) {
+    return res.status(auth.status).json({ error: auth.error });
+  }
+
+  const admin = await requireAdmin(auth.user);
+  if (!admin.ok) {
+    return res.status(403).json({ error: admin.error });
+  }
+
+  const bodySchema = z.object({ id: z.string().min(1) });
+  let parsed: z.infer<typeof bodySchema>;
+  try {
+    parsed = bodySchema.parse(req.body);
+  } catch (e) {
+    const message = e instanceof Error ? e.message : "Invalid request";
+    return res.status(400).json({ error: message });
+  }
+
+  const url = getSupabaseUrl();
+  const serviceRole = getSupabaseServiceRoleKey();
+  if (!url || !serviceRole) {
+    return res.status(500).json({ error: "Supabase env not configured" });
+  }
+
+  const supabaseAdmin = createClient(url, serviceRole, { auth: { persistSession: false, autoRefreshToken: false } });
+  const { error } = await supabaseAdmin.from("drivers").delete().eq("id", parsed.id).eq("user_id", auth.user.id);
+  if (error) {
+    return res.status(400).json({ error: error.message });
+  }
+
+  return res.status(200).json({ success: true });
+});
+
 app.get("/api/places", async (req, res) => {
   try {
     const q = String(req.query.q ?? "").trim();

@@ -1,27 +1,26 @@
 import type { Driver } from "@/data/mockData";
-import { drivers as mockDrivers } from "@/data/mockData";
 
 const STORAGE_KEY = "transportmer.fleet.drivers.v1";
 
 export function loadDrivers(): Driver[] {
   if (typeof window === "undefined") {
-    return normalizeDrivers(mockDrivers);
+    return [];
   }
 
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY);
     if (!raw) {
-      return normalizeDrivers(mockDrivers);
+      return [];
     }
 
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) {
-      return normalizeDrivers(mockDrivers);
+      return [];
     }
 
     return normalizeDrivers(parsed as Driver[]);
   } catch {
-    return normalizeDrivers(mockDrivers);
+    return [];
   }
 }
 
