@@ -65,7 +65,8 @@ export default function Routes() {
   const [pendingSelectId, setPendingSelectId] = useState<string | null>(null);
   const [pendingAction, setPendingAction] = useState<"select" | "new" | null>(null);
 
-  const [activeTab, setActiveTab] = useState<"editor" | "saved">("editor");
+  const [activeTab, setActiveTab] = useState<"editor" | "saved" | "locations">("editor");
+  const [locationTabQuery, setLocationTabQuery] = useState("");
 
   const [addStopOpen, setAddStopOpen] = useState(false);
   const [createLocationOpen, setCreateLocationOpen] = useState(false);
@@ -457,18 +458,28 @@ export default function Routes() {
             <DropdownMenuLabel>Create</DropdownMenuLabel>
             <DropdownMenuSeparator />
             <DropdownMenuItem onClick={requestNew}>Add route</DropdownMenuItem>
-            <DropdownMenuItem onClick={() => setCreateLocationOpen(true)}>Add location</DropdownMenuItem>
+            <DropdownMenuItem
+              onClick={() => {
+                setActiveTab("locations");
+                setCreateLocationOpen(true);
+              }}
+            >
+              Add location
+            </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
 
-      <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as "editor" | "saved")}>
+      <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as "editor" | "saved" | "locations")}>
         <TabsList className="w-full">
           <TabsTrigger value="editor" className="flex-1">
             Editor
           </TabsTrigger>
           <TabsTrigger value="saved" className="flex-1">
             Saved routes ({routes.length})
+          </TabsTrigger>
+          <TabsTrigger value="locations" className="flex-1">
+            Locations ({locations.length})
           </TabsTrigger>
         </TabsList>
 
@@ -479,21 +490,6 @@ export default function Routes() {
               <span className="text-xs text-muted-foreground bg-muted px-2 py-0.5 rounded-full">{routes.length}</span>
             </div>
             <div className="p-2 space-y-2 max-h-[calc(100vh-260px)] overflow-y-auto">
-              {draft && !routes.some((r) => r.id === draft.id) ? (
-                <button
-                  type="button"
-                  className={cn(
-                    "w-full text-left rounded-lg border px-3 py-2.5 transition-colors",
-                    "bg-primary/5 border-primary/30",
-                  )}
-                >
-                  <p className="text-xs font-semibold text-foreground">Draft (unsaved)</p>
-                  <p className="text-[10px] text-muted-foreground mt-0.5 line-clamp-1">
-                    {draft.origin?.label ? `${draft.origin.label} → ${draft.destination?.label ?? ""}` : "Set origin and destination"}
-                  </p>
-                </button>
-              ) : null}
-
               {routes.length === 0 ? (
                 <div className="p-6 text-center text-muted-foreground">
                   <MapPin className="w-7 h-7 mx-auto mb-2 opacity-30" />
@@ -518,6 +514,54 @@ export default function Routes() {
                   </p>
                 </button>
               ))}
+            </div>
+          </div>
+        </TabsContent>
+
+        <TabsContent value="locations">
+          <div className="bg-card border border-border rounded-xl overflow-hidden">
+            <div className="px-4 py-3 border-b border-border flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-foreground">Locations</p>
+                <p className="text-xs text-muted-foreground mt-0.5">Saved places you can reuse across routes.</p>
+              </div>
+              <Button variant="outline" onClick={() => setCreateLocationOpen(true)}>
+                <Plus className="w-4 h-4" /> Add
+              </Button>
+            </div>
+
+            <div className="p-3 border-b border-border">
+              <Input
+                value={locationTabQuery}
+                onChange={(e) => setLocationTabQuery(e.target.value)}
+                placeholder="Search locations"
+              />
+            </div>
+
+            <div className="p-2 space-y-2 max-h-[calc(100vh-310px)] overflow-y-auto">
+              {locations.length === 0 ? (
+                <div className="p-6 text-center text-muted-foreground">
+                  <MapPin className="w-7 h-7 mx-auto mb-2 opacity-30" />
+                  <p className="text-sm">No locations yet</p>
+                  <p className="text-xs mt-1">Create a location to reuse it as origin, destination, or stopover.</p>
+                </div>
+              ) : (
+                locations
+                  .filter((l) => {
+                    const q = locationTabQuery.trim().toLowerCase();
+                    if (!q) return true;
+                    return `${l.kind} ${l.label}`.toLowerCase().includes(q);
+                  })
+                  .sort((a, b) => a.label.localeCompare(b.label))
+                  .map((l) => (
+                    <div key={l.id} className="bg-background border border-border rounded-lg p-3">
+                      <p className="text-xs font-semibold text-foreground line-clamp-2">{l.label}</p>
+                      <p className="text-[10px] text-muted-foreground mt-1">
+                        {l.kind} • {l.lat.toFixed(6)}, {l.lng.toFixed(6)}
+                      </p>
+                    </div>
+                  ))
+              )}
             </div>
           </div>
         </TabsContent>

@@ -26,6 +26,7 @@ export default function LocationPicker({ label, value, onChange, locations = [],
   const [searchResults, setSearchResults] = useState<Array<{ label: string; lat: number; lng: number }>>([]);
 
   const [existingQuery, setExistingQuery] = useState("");
+  const [existingOpen, setExistingOpen] = useState(false);
 
   const [googleLink, setGoogleLink] = useState("");
   const [googleLabel, setGoogleLabel] = useState(value?.label ?? "");
@@ -34,12 +35,19 @@ export default function LocationPicker({ label, value, onChange, locations = [],
   const [googleError, setGoogleError] = useState<string | null>(null);
 
   const abortRef = useRef<AbortController | null>(null);
+  const existingBlurTimeoutRef = useRef<number | null>(null);
 
   useEffect(() => {
     if (!canShowExisting && tab === "existing") {
       setTab("google_search");
     }
   }, [canShowExisting, tab]);
+
+  useEffect(() => {
+    if (tab !== "existing") {
+      setExistingOpen(false);
+    }
+  }, [tab]);
 
   useEffect(() => {
     setGoogleLabel(value?.label ?? "");
@@ -175,31 +183,49 @@ export default function LocationPicker({ label, value, onChange, locations = [],
             <Input
               value={existingQuery}
               onChange={(e) => setExistingQuery(e.target.value)}
+              onFocus={() => {
+                if (existingBlurTimeoutRef.current !== null) {
+                  window.clearTimeout(existingBlurTimeoutRef.current);
+                  existingBlurTimeoutRef.current = null;
+                }
+                setExistingOpen(true);
+              }}
+              onBlur={() => {
+                if (existingBlurTimeoutRef.current !== null) {
+                  window.clearTimeout(existingBlurTimeoutRef.current);
+                }
+                existingBlurTimeoutRef.current = window.setTimeout(() => {
+                  setExistingOpen(false);
+                  existingBlurTimeoutRef.current = null;
+                }, 150);
+              }}
               placeholder="Search saved locations"
             />
 
-            {filteredExisting.length === 0 ? (
-              <p className="text-xs text-muted-foreground">No saved locations.</p>
-            ) : (
-              <div className="space-y-2">
-                {filteredExisting.map((l) => (
-                  <button
-                    key={l.id}
-                    type="button"
-                    onClick={() => applyExisting(l)}
-                    className={cn(
-                      "w-full text-left bg-background border border-border rounded-lg p-3 hover:bg-muted/30 transition-colors",
-                      value?.source === "library" && value.locationId === l.id && "border-primary/50",
-                    )}
-                  >
-                    <p className="text-xs font-medium text-foreground line-clamp-2">{l.label}</p>
-                    <p className="text-[10px] text-muted-foreground mt-1">
-                      {l.kind} • {l.lat.toFixed(6)}, {l.lng.toFixed(6)}
-                    </p>
-                  </button>
-                ))}
-              </div>
-            )}
+            {existingOpen ? (
+              filteredExisting.length === 0 ? (
+                <p className="text-xs text-muted-foreground">No saved locations.</p>
+              ) : (
+                <div className="space-y-2">
+                  {filteredExisting.map((l) => (
+                    <button
+                      key={l.id}
+                      type="button"
+                      onClick={() => applyExisting(l)}
+                      className={cn(
+                        "w-full text-left bg-background border border-border rounded-lg p-3 hover:bg-muted/30 transition-colors",
+                        value?.source === "library" && value.locationId === l.id && "border-primary/50",
+                      )}
+                    >
+                      <p className="text-xs font-medium text-foreground line-clamp-2">{l.label}</p>
+                      <p className="text-[10px] text-muted-foreground mt-1">
+                        {l.kind} • {l.lat.toFixed(6)}, {l.lng.toFixed(6)}
+                      </p>
+                    </button>
+                  ))}
+                </div>
+              )
+            ) : null}
           </TabsContent>
         ) : null}
 
