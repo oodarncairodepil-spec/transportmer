@@ -37,7 +37,7 @@ import { useAuth } from "@/components/AuthProvider";
 import { getSupabaseClient } from "@/lib/supabaseClient";
 import { loadLocations, saveLocations, upsertLocation, type SavedLocation } from "@/lib/locationsStorage";
 import { loadRoutes, makeId, normalizeStops, saveRoutes, type RouteModel } from "@/lib/routesStorage";
-import { getTruckRouteOptions, type TruckRouteOption } from "@/lib/truckRouting";
+import { fetchTruckRouteResponse, mapTruckRouteResponseToOptions, type TruckRouteOption } from "@/lib/truckRouting";
 import { AlertTriangle, ArrowDown, ArrowUp, CheckCircle2, ChevronDown, Loader2, MapPin, Plus, Trash2, XCircle } from "lucide-react";
 
 const makeDraft = (): RouteModel => {
@@ -86,6 +86,9 @@ export default function Routes() {
   const [routeError, setRouteError] = useState<string | null>(null);
   const [selectedRouteId, setSelectedRouteId] = useState<string | null>(null);
   const [routingSource, setRoutingSource] = useState<"gmaps_osm" | "here_osm" | "here">("gmaps_osm");
+  const [needsRouteFetch, setNeedsRouteFetch] = useState(false);
+  const [routeRequestKey, setRouteRequestKey] = useState(0);
+  const [routeApiResponse, setRouteApiResponse] = useState<any>(null);
   const routeAbortRef = useRef<AbortController | null>(null);
 
   const selectedRoute = useMemo(() => {
@@ -433,6 +436,23 @@ export default function Routes() {
       setRouteError(null);
       setRouteLoading(false);
       setSelectedRouteId(null);
+      setNeedsRouteFetch(false);
+      setRouteApiResponse(null);
+      return;
+    }
+    setNeedsRouteFetch(true);
+    setRouteOptions([]);
+    setSelectedRouteId(null);
+    setRouteError(null);
+    setRouteLoading(false);
+    setRouteApiResponse(null);
+  }, [draft?.destination, draft?.origin, draft?.stops, routingSource]);
+
+  useEffect(() => {
+    if (!draft?.origin || !draft.destination) {
+      return;
+    }
+    if (routeRequestKey === 0) {
       return;
     }
 
@@ -445,16 +465,18 @@ export default function Routes() {
 
     const stops = normalizeStops(draft.stops).map((s) => ({ lat: s.lat, lng: s.lng, label: s.label }));
 
-    getTruckRouteOptions(
+    fetchTruckRouteResponse(
       { lat: draft.origin.lat, lng: draft.origin.lng },
       { lat: draft.destination.lat, lng: draft.destination.lng },
       { stops, routingSource },
       controller.signal,
     )
-      .then((opts) => {
+      .then((data) => {
         if (controller.signal.aborted) {
           return;
         }
+        setRouteApiResponse(data);
+        const opts = mapTruckRouteResponseToOptions(data);
         setRouteOptions(opts);
         setSelectedRouteId(opts[0]?.id ?? null);
       })
@@ -462,6 +484,7 @@ export default function Routes() {
         if (controller.signal.aborted) {
           return;
         }
+        setRouteApiResponse(null);
         setRouteOptions([]);
         setSelectedRouteId(null);
         setRouteError(e instanceof Error ? e.message : "Failed to fetch route options");
@@ -475,7 +498,7 @@ export default function Routes() {
     return () => {
       controller.abort();
     };
-  }, [draft?.destination, draft?.origin, draft?.stops, routingSource]);
+  }, [routeRequestKey]);
 
   useEffect(() => {
     if (!session?.user?.id) {
@@ -745,10 +768,61 @@ export default function Routes() {
                             </SelectContent>
                           </Select>
                         </div>
+                        <div className="space-y-2">
+                          <p className="text-xs font-medium text-foreground">Actions</p>
+                          <Button
+                            type="button"
+                            className="w-full"
+                            disabled={routeLoading || !needsRouteFetch}
+                            onClick={() => {
+                              setNeedsRouteFetch(false);
+                              setRouteRequestKey((k) => k + 1);
+                            }}
+                          >
+                            Find truck-safe routes
+                          </Button>
+                        </div>
                       </div>
 
+                      {needsRouteFetch ? <p className="text-xs text-muted-foreground">Select routing source then click Find.</p> : null}
                       {routeLoading ? <p className="text-xs text-muted-foreground">Loading route options…</p> : null}
                       {routeError ? <p className="text-xs text-destructive">{routeError}</p> : null}
+
+                      {routeApiResponse ? (
+                        <Accordion type="single" collapsible className="w-full">
+                          <AccordionItem value="api_response">
+                            <AccordionTrigger className="text-sm">
+                              <div className="flex flex-1 items-center justify-between gap-3">
+                                <span className="text-sm text-foreground">API response</span>
+                                <span className="text-xs text-muted-foreground">
+                                  {(routeApiResponse as any)?.routes?.[0]?.provider ?? routingSource}
+                                </span>
+                              </div>
+                            </AccordionTrigger>
+                            <AccordionContent>
+                              <div className="space-y-2">
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  onClick={async () => {
+                                    try {
+                                      await navigator.clipboard.writeText(JSON.stringify(routeApiResponse, null, 2));
+                                      toast.success("API response copied");
+                                    } catch {
+                                      toast.error("Failed to copy API response");
+                                    }
+                                  }}
+                                >
+                                  Copy JSON
+                                </Button>
+                                <pre className="max-h-[260px] overflow-y-auto rounded-lg border border-border bg-muted/20 p-3 text-[10px] text-foreground">
+                                  {JSON.stringify(routeApiResponse, null, 2)}
+                                </pre>
+                              </div>
+                            </AccordionContent>
+                          </AccordionItem>
+                        </Accordion>
+                      ) : null}
 
                       {routeOptions.length > 0 ? (
                         <div className="space-y-2">
@@ -775,7 +849,7 @@ export default function Routes() {
                                     {durationLabel} • {km == null ? "—" : km.toFixed(1)} km
                                   </p>
                                   <p className="text-[10px] text-muted-foreground">
-                                    Highway score {opt.highwayScore} • Major road {opt.majorRoadScore}
+                                    {(opt.apiProvider ? `${opt.apiProvider} • ` : "") + `Highway score ${opt.highwayScore} • Major road ${opt.majorRoadScore}`}
                                   </p>
                                 </div>
                                 {opt.stepsPreview.length > 0 ? (

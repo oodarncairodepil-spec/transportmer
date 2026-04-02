@@ -15,6 +15,7 @@ export type TruckRouteOption = {
   score?: number;
   isTruckSafe?: boolean;
   violations?: Array<{ type: string; location: [number, number] }>;
+  apiProvider?: string;
   highwayScore: number;
   majorRoadScore: number;
   via: string;
@@ -75,6 +76,91 @@ type BackendResponse = {
     routeHandle?: string;
   }>;
 };
+
+export async function fetchTruckRouteResponse(
+  origin: LatLng,
+  destination: LatLng,
+  opts?: {
+    stops?: Array<{ lat: number; lng: number; label?: string }>;
+    routingSource?: "gmaps_osm" | "here_osm" | "here";
+  },
+  signal?: AbortSignal,
+) {
+  const result = await apiFetchJson<BackendResponse>(
+    "/api/truck-route",
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        origin,
+        destination,
+        stops: opts?.stops ?? [],
+        alternatives: true,
+        minScore: -1,
+        truckConfig: { maxWeight: 15000, maxHeight: 4.0 },
+        routingSource: opts?.routingSource ?? "gmaps_osm",
+      }),
+      signal,
+    },
+    { label: "POST /api/truck-route" },
+  );
+
+  if (result.ok === false) {
+    throw new Error(result.error || "Failed to fetch route options");
+  }
+  return result.data;
+}
+
+export function mapTruckRouteResponseToOptions(data: BackendResponse): TruckRouteOption[] {
+  if (!data || !Array.isArray(data.routes) || data.routes.length === 0) {
+    return [];
+  }
+
+  const mapped = data.routes.map((r) => {
+    const steps = Array.isArray(r.steps) ? r.steps : [];
+    const stepsPreview = steps
+      .map((s) => (s.name?.trim() ? s.name.trim() : s.instruction.trim()))
+      .filter((s) => s.length > 0)
+      .slice(0, 4);
+
+    const segs = r.segments ?? [];
+    const highwayScore = segs.filter((s) => /(motorway|trunk|primary)/i.test(s.highway ?? "")).length;
+    const majorRoadScore = segs.filter((s) => /(secondary|tertiary)/i.test(s.highway ?? "")).length;
+    const via = segs
+      .map((s) => s.highway)
+      .filter((v): v is string => typeof v === "string" && v.length > 0)
+      .filter((v, i, a) => a.indexOf(v) === i)
+      .slice(0, 2)
+      .join(" and ");
+
+    const line = Array.isArray(r.geometry) ? r.geometry : [];
+    const dist = r.distanceMeters && r.distanceMeters > 0 ? r.distanceMeters : lineDistanceMeters(line);
+    const dur = r.durationSeconds && r.durationSeconds > 0 ? r.durationSeconds : dist > 0 ? (dist / 1000 / 60) * 3600 : 0;
+    return {
+      id: r.routeId,
+      distanceMeters: dist,
+      durationSeconds: dur,
+      score: r.score,
+      isTruckSafe: r.isTruckSafe,
+      violations: r.violations,
+      apiProvider: r.provider,
+      highwayScore,
+      majorRoadScore,
+      via,
+      tollLikely: false,
+      stepsPreview,
+      steps,
+      line,
+      segments: segs,
+      provider: "backend" as const,
+    } satisfies TruckRouteOption;
+  });
+
+  const bestFirst = mapped
+    .slice()
+    .sort((a, b) => (b.id === data.bestRouteId ? 1 : 0) - (a.id === data.bestRouteId ? 1 : 0));
+  return bestFirst.slice(0, 3);
+}
 
 function haversineMeters(a: { lat: number; lng: number }, b: { lat: number; lng: number }) {
   const R = 6371000;
@@ -202,72 +288,10 @@ export async function getTruckRouteOptions(
   signal?: AbortSignal,
 ) {
   try {
-    const result = await apiFetchJson<BackendResponse>(
-      "/api/truck-route",
-      {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          origin,
-          destination,
-          stops: opts?.stops ?? [],
-          alternatives: true,
-          minScore: -1,
-          truckConfig: { maxWeight: 15000, maxHeight: 4.0 },
-          routingSource: opts?.routingSource ?? "gmaps_osm",
-        }),
-        signal,
-      },
-      { label: "POST /api/truck-route" },
-    );
-
-    if (result.ok) {
-      const data = result.data;
-      if (data && Array.isArray(data.routes) && data.routes.length > 0) {
-        const mapped = data.routes.map((r) => {
-          const steps = Array.isArray(r.steps) ? r.steps : [];
-          const stepsPreview = steps
-            .map((s) => (s.name?.trim() ? s.name.trim() : s.instruction.trim()))
-            .filter((s) => s.length > 0)
-            .slice(0, 4);
-
-          const segs = r.segments ?? [];
-          const highwayScore = segs.filter((s) => /(motorway|trunk|primary)/i.test(s.highway ?? "")).length;
-          const majorRoadScore = segs.filter((s) => /(secondary|tertiary)/i.test(s.highway ?? "")).length;
-          const via = segs
-            .map((s) => s.highway)
-            .filter((v): v is string => typeof v === "string" && v.length > 0)
-            .filter((v, i, a) => a.indexOf(v) === i)
-            .slice(0, 2)
-            .join(" and ");
-
-          const line = Array.isArray(r.geometry) ? r.geometry : [];
-          const dist = r.distanceMeters && r.distanceMeters > 0 ? r.distanceMeters : lineDistanceMeters(line);
-          const dur = r.durationSeconds && r.durationSeconds > 0 ? r.durationSeconds : dist > 0 ? (dist / 1000 / 60) * 3600 : 0;
-          return {
-            id: r.routeId,
-            distanceMeters: dist,
-            durationSeconds: dur,
-            score: r.score,
-            isTruckSafe: r.isTruckSafe,
-            violations: r.violations,
-            highwayScore,
-            majorRoadScore,
-            via,
-            tollLikely: false,
-            stepsPreview,
-            steps,
-            line,
-            segments: segs,
-            provider: "backend" as const,
-          } satisfies TruckRouteOption;
-        });
-
-        const bestFirst = mapped
-          .slice()
-          .sort((a, b) => (b.id === data.bestRouteId ? 1 : 0) - (a.id === data.bestRouteId ? 1 : 0));
-        return bestFirst.slice(0, 3);
-      }
+    const data = await fetchTruckRouteResponse(origin, destination, opts, signal);
+    const mapped = mapTruckRouteResponseToOptions(data);
+    if (mapped.length > 0) {
+      return mapped;
     }
   } catch {
     // fall back to OSRM below
