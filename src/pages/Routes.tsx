@@ -30,6 +30,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import { apiFetchJson } from "@/lib/apiFetch";
 import { useAuth } from "@/components/AuthProvider";
@@ -84,6 +85,7 @@ export default function Routes() {
   const [routeLoading, setRouteLoading] = useState(false);
   const [routeError, setRouteError] = useState<string | null>(null);
   const [selectedRouteId, setSelectedRouteId] = useState<string | null>(null);
+  const [routingSource, setRoutingSource] = useState<"gmaps_osm" | "here_osm" | "here">("gmaps_osm");
   const routeAbortRef = useRef<AbortController | null>(null);
 
   const selectedRoute = useMemo(() => {
@@ -446,7 +448,7 @@ export default function Routes() {
     getTruckRouteOptions(
       { lat: draft.origin.lat, lng: draft.origin.lng },
       { lat: draft.destination.lat, lng: draft.destination.lng },
-      { stops },
+      { stops, routingSource },
       controller.signal,
     )
       .then((opts) => {
@@ -473,7 +475,7 @@ export default function Routes() {
     return () => {
       controller.abort();
     };
-  }, [draft?.destination, draft?.origin, draft?.stops]);
+  }, [draft?.destination, draft?.origin, draft?.stops, routingSource]);
 
   useEffect(() => {
     if (!session?.user?.id) {
@@ -727,6 +729,22 @@ export default function Routes() {
                       <div>
                         <p className="text-sm font-semibold text-foreground">Recommended truck routes</p>
                         <p className="text-xs text-muted-foreground">Highway-priority options for the selected origin and destination.</p>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div className="space-y-2">
+                          <p className="text-xs font-medium text-foreground">Routing source</p>
+                          <Select value={routingSource} onValueChange={(v) => setRoutingSource(v as any)}>
+                            <SelectTrigger>
+                              <SelectValue placeholder="Select routing source" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="gmaps_osm">GMaps + OSM</SelectItem>
+                              <SelectItem value="here_osm">HERE + OSM</SelectItem>
+                              <SelectItem value="here">HERE only</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
                       </div>
 
                       {routeLoading ? <p className="text-xs text-muted-foreground">Loading route options…</p> : null}

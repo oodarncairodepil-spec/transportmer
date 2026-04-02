@@ -41,9 +41,10 @@ type BackendResponse = {
   bestRouteId: string;
   routes: Array<{
     routeId: string;
-    score: number;
-    isTruckSafe: boolean;
-    violations: Array<{ type: string; location: [number, number] }>;
+    provider?: string;
+    score?: number;
+    isTruckSafe?: boolean;
+    violations?: Array<{ type: string; location: [number, number] }>;
     polyline: string;
     distanceMeters?: number;
     durationSeconds?: number;
@@ -53,8 +54,8 @@ type BackendResponse = {
       distanceMeters: number;
       durationSeconds: number;
     }>;
-    geometry: Array<{ lat: number; lng: number }>;
-    segments: Array<{
+    geometry?: Array<{ lat: number; lng: number }>;
+    segments?: Array<{
       highway?: string;
       maxspeed?: string;
       maxweight?: string;
@@ -66,6 +67,12 @@ type BackendResponse = {
       tagCount?: number;
       score: number;
     }>;
+    sections?: Array<{
+      summary?: { travelTime?: number; length?: number };
+      tolls?: unknown;
+      truckRoadTypes?: unknown;
+    }>;
+    routeHandle?: string;
   }>;
 };
 
@@ -188,7 +195,10 @@ function summarizeVia(roadNames: string[]) {
 export async function getTruckRouteOptions(
   origin: LatLng,
   destination: LatLng,
-  opts?: { stops?: Array<{ lat: number; lng: number; label?: string }> },
+  opts?: {
+    stops?: Array<{ lat: number; lng: number; label?: string }>;
+    routingSource?: "gmaps_osm" | "here_osm" | "here";
+  },
   signal?: AbortSignal,
 ) {
   try {
@@ -204,6 +214,7 @@ export async function getTruckRouteOptions(
           alternatives: true,
           minScore: -1,
           truckConfig: { maxWeight: 15000, maxHeight: 4.0 },
+          routingSource: opts?.routingSource ?? "gmaps_osm",
         }),
         signal,
       },
