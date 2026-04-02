@@ -12,6 +12,7 @@ import { scoreRoutes, selectBestRoute } from "./routeSelector";
 import type { LatLng } from "./lib/polyline";
 import { encodeGooglePolyline } from "./lib/polyline";
 import { getSupabaseClient } from "./supabase/client";
+import { TruckRoutingService } from "./routing/TruckRoutingService";
 
 const app = express();
 app.use(cors());
@@ -172,12 +173,40 @@ const truckConfigSchema = z.object({
   maxHeight: z.number().positive().default(4.0),
 });
 
+const vehicleSchema = z.object({
+  height: z.number().positive().optional(),
+  width: z.number().positive().optional(),
+  length: z.number().positive().optional(),
+  weight: z.number().positive().optional(),
+  axleCount: z.number().int().positive().optional(),
+  trailerCount: z.number().int().nonnegative().optional(),
+  engineType: z.string().optional(),
+  category: z.string().optional(),
+});
+
+const avoidSchema = z.object({
+  features: z.array(z.string()).optional(),
+  truckRoadTypes: z.array(z.string()).optional(),
+  areas: z.array(z.string()).optional(),
+});
+
 const requestSchema = z.object({
   origin: z.object({ lat: z.number(), lng: z.number() }),
   destination: z.object({ lat: z.number(), lng: z.number() }),
   alternatives: z.boolean().optional().default(true),
   minScore: z.number().optional().default(-1),
   truckConfig: truckConfigSchema.optional().default({ maxWeight: 15000, maxHeight: 4.0 }),
+  vehicle: vehicleSchema.optional(),
+  routingSource: z.enum(["gmaps_osm", "here_osm", "here"]).optional().default("gmaps_osm"),
+  routingMode: z.enum(["fast", "short"]).optional(),
+  departureTime: z.string().optional(),
+  traffic: z.boolean().optional(),
+  units: z.enum(["metric", "imperial"]).optional(),
+  lang: z.string().optional(),
+  avoid: avoidSchema.optional(),
+  networkRestrictedTruck: z.boolean().optional(),
+  permittedNetworks: z.array(z.string()).optional(),
+  fallback: z.enum(["none", "gmaps_osm", "osm"]).optional(),
   save: z.boolean().optional().default(false),
   title: z.string().optional(),
   stops: z.array(z.object({ lat: z.number(), lng: z.number(), label: z.string().optional() })).optional().default([]),
@@ -189,79 +218,131 @@ app.post("/api/truck-route", async (req, res) => {
     const googleKey = process.env.GOOGLE_API_KEY || process.env.GOOGLE_MAPS_API_KEY;
     const overpassUrl = process.env.OVERPASS_URL || "https://overpass-api.de/api/interpreter";
 
-    let candidates: Array<{
-      routeId: string;
-      polyline: string;
-      distanceMeters?: number;
-      durationSeconds?: number;
-      steps?: Array<{ instruction: string; name: string; distanceMeters: number; durationSeconds: number }>;
-    }> = [];
+    const source = parsed.routingSource;
+    const vehicle = {
+      height: parsed.vehicle?.height ?? parsed.truckConfig.maxHeight,
+      width: parsed.vehicle?.width,
+      length: parsed.vehicle?.length,
+      weight: parsed.vehicle?.weight ?? parsed.truckConfig.maxWeight,
+      axleCount: parsed.vehicle?.axleCount,
+      trailerCount: parsed.vehicle?.trailerCount,
+      engineType: parsed.vehicle?.engineType,
+      category: parsed.vehicle?.category,
+    };
 
-    if (googleKey) {
-      const googleRoutes = await fetchGoogleDirections({
-        origin: parsed.origin as LatLng,
-        destination: parsed.destination as LatLng,
-        alternatives: parsed.alternatives,
-        apiKey: googleKey,
-        waypoints: parsed.stops.map((s) => ({ lat: s.lat, lng: s.lng, label: s.label })),
-      });
-      candidates = googleRoutes.map((r) => ({
-        routeId: r.routeId,
-        polyline: r.polyline,
-        distanceMeters: r.distanceMeters,
-        durationSeconds: r.durationSeconds,
-        steps: r.steps,
-      }));
-    } else {
-      try {
-        const osrmRoutes = await fetchOsrmFallback({
+    let response: { bestRouteId: string; routes: any[] };
+
+    if (source === "gmaps_osm") {
+      let candidates: Array<{
+        routeId: string;
+        polyline: string;
+        distanceMeters?: number;
+        durationSeconds?: number;
+        steps?: Array<{ instruction: string; name: string; distanceMeters: number; durationSeconds: number }>;
+      }> = [];
+
+      if (googleKey) {
+        const googleRoutes = await fetchGoogleDirections({
           origin: parsed.origin as LatLng,
           destination: parsed.destination as LatLng,
-          waypoints: parsed.stops.map((s) => ({ lat: s.lat, lng: s.lng, label: s.label })),
           alternatives: parsed.alternatives,
+          apiKey: googleKey,
+          waypoints: parsed.stops.map((s) => ({ lat: s.lat, lng: s.lng, label: s.label })),
         });
-        candidates = osrmRoutes.map((r) => ({
+        candidates = googleRoutes.map((r) => ({
           routeId: r.routeId,
           polyline: r.polyline,
           distanceMeters: r.distanceMeters,
           durationSeconds: r.durationSeconds,
           steps: r.steps,
         }));
-      } catch {
-        const fallbackLine = [parsed.origin, ...parsed.stops.map((s) => ({ lat: s.lat, lng: s.lng })), parsed.destination];
-        candidates = [{ routeId: "fallback_direct", polyline: encodeGooglePolyline(fallbackLine) }];
+      } else {
+        try {
+          const osrmRoutes = await fetchOsrmFallback({
+            origin: parsed.origin as LatLng,
+            destination: parsed.destination as LatLng,
+            waypoints: parsed.stops.map((s) => ({ lat: s.lat, lng: s.lng, label: s.label })),
+            alternatives: parsed.alternatives,
+          });
+          candidates = osrmRoutes.map((r) => ({
+            routeId: r.routeId,
+            polyline: r.polyline,
+            distanceMeters: r.distanceMeters,
+            durationSeconds: r.durationSeconds,
+            steps: r.steps,
+          }));
+        } catch {
+          const fallbackLine = [parsed.origin, ...parsed.stops.map((s) => ({ lat: s.lat, lng: s.lng })), parsed.destination];
+          candidates = [{ routeId: "fallback_direct", polyline: encodeGooglePolyline(fallbackLine) }];
+        }
       }
+
+      const scored = await scoreRoutes({
+        routes: candidates,
+        truck: parsed.truckConfig,
+        overpassUrl,
+      });
+
+      const sorted = scored.slice().sort((a, b) => b.score - a.score);
+      const { best } = selectBestRoute(sorted, parsed.minScore);
+      if (!best) {
+        return res.status(404).json({ error: "No route options" });
+      }
+
+      const routes = sorted.map((r) => ({
+        provider: "gmaps_osm",
+        routeId: r.routeId,
+        score: r.score,
+        isTruckSafe: r.isTruckSafe,
+        violations: r.violations,
+        polyline: r.polyline,
+        distanceMeters: r.distanceMeters,
+        durationSeconds: r.durationSeconds,
+        steps: r.steps ?? [],
+        geometry: r.points,
+        segments: r.segments,
+        sections: [
+          {
+            summary: {
+              travelTime: Number(r.durationSeconds ?? 0),
+              length: Number(r.distanceMeters ?? 0),
+            },
+          },
+        ],
+      }));
+
+      response = {
+        bestRouteId: best.routeId,
+        routes,
+      };
+    } else {
+      const service = new TruckRoutingService();
+      const result = await service.calculate_route(
+        parsed.origin,
+        parsed.destination,
+        vehicle,
+        {
+          source,
+          alternatives: parsed.alternatives,
+          minScore: parsed.minScore,
+          via: parsed.stops.map((s) => ({ lat: s.lat, lng: s.lng })),
+          routingMode: parsed.routingMode,
+          departureTime: parsed.departureTime,
+          traffic: parsed.traffic,
+          units: parsed.units,
+          lang: parsed.lang,
+          avoid: parsed.avoid,
+          networkRestrictedTruck: parsed.networkRestrictedTruck,
+          permittedNetworks: parsed.permittedNetworks,
+          fallback: parsed.fallback,
+        },
+      );
+
+      response = {
+        bestRouteId: result.bestRouteId,
+        routes: result.routes,
+      };
     }
-
-    const scored = await scoreRoutes({
-      routes: candidates,
-      truck: parsed.truckConfig,
-      overpassUrl,
-    });
-
-    const sorted = scored.slice().sort((a, b) => b.score - a.score);
-    const { best } = selectBestRoute(sorted, parsed.minScore);
-    if (!best) {
-      return res.status(404).json({ error: "No route options" });
-    }
-
-    const routes = sorted.map((r) => ({
-      routeId: r.routeId,
-      score: r.score,
-      isTruckSafe: r.isTruckSafe,
-      violations: r.violations,
-      polyline: r.polyline,
-      distanceMeters: r.distanceMeters,
-      durationSeconds: r.durationSeconds,
-      steps: r.steps ?? [],
-      geometry: r.points,
-      segments: r.segments,
-    }));
-
-    const response = {
-      bestRouteId: best.routeId,
-      routes,
-    };
 
     if (parsed.save) {
       const auth = await requireUser(req);
@@ -294,16 +375,17 @@ app.post("/api/truck-route", async (req, res) => {
         return res.status(200).json({ ...response, saved: false, saveError: routeErr.message });
       }
 
+      const best = response.routes.find((r) => r.routeId === response.bestRouteId) ?? response.routes[0];
       const recoInsert = {
         map_route_id: routeRow.id,
-        provider: googleKey ? "google" : "fallback",
+        provider: source,
         route_id: best.routeId,
-        score: best.score,
-        is_truck_safe: best.isTruckSafe,
-        violations: best.violations,
+        score: best.score ?? 0,
+        is_truck_safe: best.isTruckSafe ?? false,
+        violations: best.violations ?? [],
         polyline: best.polyline,
-        geometry: best.points,
-        segments: best.segments,
+        geometry: best.geometry ?? [],
+        segments: best.segments ?? [],
       };
 
       const { data: recoRow, error: recoErr } = await supabase
@@ -316,7 +398,7 @@ app.post("/api/truck-route", async (req, res) => {
       }
 
       if (best.segments && best.segments.length > 0) {
-        const segmentsInsert = best.segments.map(seg => ({
+        const segmentsInsert = best.segments.map((seg: any) => ({
           map_route_recommendation_id: recoRow.id,
           highway: seg.highway ?? null,
           maxspeed: seg.maxspeed ?? null,
@@ -325,7 +407,7 @@ app.post("/api/truck-route", async (req, res) => {
           maxheight: seg.maxheight ?? null,
           way: seg.osmWayId ? String(seg.osmWayId) : null,
           score: seg.score ?? 0,
-          matched: seg.matched ?? false
+          matched: seg.matched ?? false,
         }));
 
         await supabase.from("map_route_segments").insert(segmentsInsert);
