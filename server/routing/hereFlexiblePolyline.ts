@@ -33,6 +33,11 @@ function zigZagDecode(u: number) {
 
 export function decodeHereFlexiblePolyline(polyline: string): LatLng[] {
   const idx = { v: 0 };
+  const version = decodeUnsignedVarint(polyline, idx);
+  if (version !== 1) {
+    throw new Error(`Unsupported flexible polyline version: ${version}`);
+  }
+
   const header = decodeUnsignedVarint(polyline, idx);
   const precision = header & 0x0f;
   const thirdDim = (header >> 4) & 0x07;
@@ -64,4 +69,3 @@ export function decodeHereFlexiblePolyline(polyline: string): LatLng[] {
 
   return out;
 }
-
