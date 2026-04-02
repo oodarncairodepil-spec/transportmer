@@ -878,6 +878,7 @@ export default function Routes() {
                       destination={{ lat: draft.destination.lat, lng: draft.destination.lng }}
                       stops={normalizeStops(draft.stops).map((s) => ({ lat: s.lat, lng: s.lng }))}
                       line={selectedRoute.line}
+                      tiles={routingSource === "here" ? "here" : "osm"}
                     />
                   ) : (
                     <div className="h-[520px] w-full rounded-xl border border-border bg-muted/20 flex items-center justify-center text-xs text-muted-foreground">

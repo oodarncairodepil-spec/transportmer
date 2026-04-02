@@ -9,6 +9,7 @@ type Props = {
   destination: LatLng;
   stops?: LatLng[];
   line: LatLng[];
+  tiles?: "osm" | "here";
 };
 
 const markerIcon = new L.Icon({
@@ -64,18 +65,28 @@ function FitBounds({ origin, destination, line, stops }: Props) {
   return null;
 }
 
-export default function RouteMap({ origin, destination, stops, line }: Props) {
+export default function RouteMap({ origin, destination, stops, line, tiles = "osm" }: Props) {
   const center: [number, number] = [origin.lat, origin.lng];
   const safeLine = useMemo(() => sanitizeLine(origin, destination, line), [destination, line, origin]);
   const polyline: [number, number][] = safeLine.map((p) => [p.lat, p.lng]);
+  const hereKey = (import.meta as any)?.env?.VITE_HERE_API_KEY as string | undefined;
 
   return (
     <div className="h-[520px] w-full rounded-xl overflow-hidden border border-border">
       <MapContainer center={center} zoom={10} scrollWheelZoom className="h-full w-full">
-        <TileLayer
-          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
-          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-        />
+        {tiles === "here" && hereKey ? (
+          <TileLayer
+            attribution='&copy; <a href="https://www.here.com">HERE</a>'
+            url={`https://2.base.maps.hereapi.com/maptile/2.1/maptile/newest/normal.day/{z}/{x}/{y}/256/png8?apiKey=${encodeURIComponent(
+              hereKey,
+            )}`}
+          />
+        ) : (
+          <TileLayer
+            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+          />
+        )}
         <Marker position={[origin.lat, origin.lng]} icon={markerIcon} />
         {(stops ?? []).map((s, idx) => (
           <Marker key={`${s.lat}_${s.lng}_${idx}`} position={[s.lat, s.lng]} icon={markerIcon} />

@@ -43,6 +43,7 @@ function uniq(arr: Array<string | undefined | null>) {
 
 function buildSignature(origin: LatLng, destination: LatLng, vehicle: TruckVehicle, opts: RouteOptions) {
   return JSON.stringify({
+    decoderVersion: 2,
     o: [origin.lat, origin.lng],
     d: [destination.lat, destination.lng],
     v: opts.via?.map((p) => [p.lat, p.lng]) ?? [],
