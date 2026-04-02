@@ -69,7 +69,7 @@ export class HEREProvider {
 
     const apiKey = process.env.HERE_API_KEY;
     if (!apiKey) {
-      throw new Error("HERE_API_KEY not configured");
+      throw new Error("HERE_API_KEY not configured (set it in local .env then restart dev:api, or in Vercel Environment Variables)");
     }
 
     const baseUrl = process.env.HERE_ROUTING_BASE_URL || "https://router.hereapi.com/v8/routes";
@@ -180,4 +180,3 @@ export class HEREProvider {
     return result;
   }
 }
-
