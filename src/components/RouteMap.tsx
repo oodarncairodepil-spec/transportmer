@@ -21,6 +21,31 @@ const markerIcon = new L.Icon({
   shadowSize: [41, 41],
 });
 
+function haversineMeters(a: LatLng, b: LatLng) {
+  const R = 6371000;
+  const toRad = (d: number) => (d * Math.PI) / 180;
+  const dLat = toRad(b.lat - a.lat);
+  const dLng = toRad(b.lng - a.lng);
+  const lat1 = toRad(a.lat);
+  const lat2 = toRad(b.lat);
+  const s =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.sin(dLng / 2) * Math.sin(dLng / 2) * Math.cos(lat1) * Math.cos(lat2);
+  return 2 * R * Math.atan2(Math.sqrt(s), Math.sqrt(1 - s));
+}
+
+function sanitizeLine(origin: LatLng, destination: LatLng, line: LatLng[]) {
+  const maxDistance = 5_000_000;
+  return (line ?? [])
+    .filter((p) => Number.isFinite(p.lat) && Number.isFinite(p.lng))
+    .filter((p) => Math.abs(p.lat) <= 90 && Math.abs(p.lng) <= 180)
+    .filter((p) => {
+      const d1 = haversineMeters(origin, p);
+      const d2 = haversineMeters(destination, p);
+      return Math.min(d1, d2) <= maxDistance;
+    });
+}
+
 function FitBounds({ origin, destination, line, stops }: Props) {
   const map = useMap();
 
@@ -41,7 +66,8 @@ function FitBounds({ origin, destination, line, stops }: Props) {
 
 export default function RouteMap({ origin, destination, stops, line }: Props) {
   const center: [number, number] = [origin.lat, origin.lng];
-  const polyline: [number, number][] = line.map((p) => [p.lat, p.lng]);
+  const safeLine = useMemo(() => sanitizeLine(origin, destination, line), [destination, line, origin]);
+  const polyline: [number, number][] = safeLine.map((p) => [p.lat, p.lng]);
 
   return (
     <div className="h-[520px] w-full rounded-xl overflow-hidden border border-border">
@@ -56,7 +82,7 @@ export default function RouteMap({ origin, destination, stops, line }: Props) {
         ))}
         <Marker position={[destination.lat, destination.lng]} icon={markerIcon} />
         {polyline.length > 1 ? <Polyline positions={polyline} pathOptions={{ color: "#0ea5e9", weight: 5 }} /> : null}
-        <FitBounds origin={origin} destination={destination} stops={stops} line={line} />
+        <FitBounds origin={origin} destination={destination} stops={stops} line={safeLine} />
       </MapContainer>
     </div>
   );

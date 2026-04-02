@@ -14,6 +14,15 @@ type HereRouteResponse = {
       summary?: { travelTime?: number; duration?: number; length?: number };
       tolls?: unknown;
       truckRoadTypes?: unknown;
+      actions?: Array<{
+        instruction?: string;
+        action?: string;
+        duration?: number;
+        length?: number;
+        roadName?: string;
+        currentRoad?: string;
+        nextRoad?: string;
+      }>;
     }>;
   }>;
 };
@@ -119,7 +128,7 @@ export class HEREProvider {
       params.set("alternatives", "3");
     }
 
-    params.set("return", "polyline,summary,tolls,truckRoadTypes");
+    params.set("return", "polyline,summary,tolls,truckRoadTypes,actions,instructions");
 
     const url = `${baseUrl}?${params.toString()}`;
     const t = withTimeout(15000);
@@ -162,6 +171,16 @@ export class HEREProvider {
 
       const googlePolyline = mergedGeometry.length > 0 ? encodeGooglePolyline(mergedGeometry) : "";
 
+      const steps = (r.sections ?? [])
+        .flatMap((s) => s.actions ?? [])
+        .map((a) => ({
+          instruction: String(a.instruction ?? a.action ?? "Continue"),
+          name: String(a.roadName ?? a.currentRoad ?? a.nextRoad ?? ""),
+          distanceMeters: Number(a.length ?? 0),
+          durationSeconds: Number(a.duration ?? 0),
+        }))
+        .filter((x) => x.instruction.trim().length > 0);
+
       return {
         provider: "here",
         routeId: String(r.id ?? `here_${idx}`),
@@ -169,6 +188,7 @@ export class HEREProvider {
         polyline: googlePolyline,
         geometry: mergedGeometry,
         sections,
+        steps,
         distanceMeters: sections.reduce((acc, s) => acc + Number(s.summary.length ?? 0), 0),
         durationSeconds: sections.reduce((acc, s) => acc + Number(s.summary.travelTime ?? 0), 0),
       };

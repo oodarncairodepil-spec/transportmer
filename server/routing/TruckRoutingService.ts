@@ -49,7 +49,8 @@ export class TruckRoutingService {
       const enriched = await this.osm.enrichWithOsm(candidates, vehicle);
       const merged = hereResult.routes.map((r) => {
         const extra = enriched.find((e) => e.routeId === r.routeId);
-        return { ...r, ...extra, provider: "here_osm" as const };
+        const nextGeometry = extra?.geometry && extra.geometry.length > 1 ? extra.geometry : r.geometry;
+        return { ...r, ...extra, geometry: nextGeometry, provider: "here_osm" as const };
       });
 
       const sorted = merged
