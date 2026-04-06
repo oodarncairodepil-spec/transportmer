@@ -1,9 +1,9 @@
-import type { LatLng } from "./lib/polyline";
-import { decodeGooglePolyline } from "./lib/polyline";
-import { sampleEveryMeters } from "./lib/geo";
-import { fetchWaysForLine, nearestWayForPoint } from "./osmEnricher/overpass";
-import type { TruckConfig, RouteViolation, ScoredSegment } from "./routeScorer";
-import { finalizeRouteScore, scoreSegment } from "./routeScorer";
+import type { LatLng } from "./lib/polyline.js";
+import { decodeGooglePolyline } from "./lib/polyline.js";
+import { sampleEveryMeters } from "./lib/geo.js";
+import { fetchWaysForLine, nearestWayForPoint } from "./osmEnricher/overpass.js";
+import type { TruckConfig, RouteViolation, ScoredSegment } from "./routeScorer.js";
+import { finalizeRouteScore, scoreSegment } from "./routeScorer.js";
 
 export type CandidateRoute = {
   routeId: string;

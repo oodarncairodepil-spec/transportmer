@@ -1,6 +1,6 @@
-import { overpassCache } from "../lib/cache";
-import type { LatLng } from "../lib/polyline";
-import { pointToSegmentDistanceMeters } from "../lib/geo";
+import { overpassCache } from "../lib/cache.js";
+import type { LatLng } from "../lib/polyline.js";
+import { pointToSegmentDistanceMeters } from "../lib/geo.js";
 
 export type OsmWay = {
   id: number;

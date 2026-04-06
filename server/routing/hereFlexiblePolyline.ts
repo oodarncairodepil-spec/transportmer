@@ -1,4 +1,4 @@
-import type { LatLng } from "./types";
+import type { LatLng } from "./types.js";
 
 const DECODING_TABLE: Record<string, number> = (() => {
   const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";

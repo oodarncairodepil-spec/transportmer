@@ -4,15 +4,16 @@ import cors from "cors";
 import express from "express";
 import { z } from "zod";
 import { createClient } from "@supabase/supabase-js";
-import { generateTempPassword } from "./lib/tempPassword";
+import { generateTempPassword } from "./lib/tempPassword.js";
 
-import { fetchGoogleDirections } from "./routeFetcher/googleDirections";
-import { fetchOsrmFallback } from "./routeFetcher/osrmFallback";
-import { scoreRoutes, selectBestRoute } from "./routeSelector";
-import type { LatLng } from "./lib/polyline";
-import { encodeGooglePolyline } from "./lib/polyline";
-import { getSupabaseClient } from "./supabase/client";
-import { TruckRoutingService } from "./routing/TruckRoutingService";
+import { fetchGoogleDirections } from "./routeFetcher/googleDirections.js";
+import { fetchOsrmFallback } from "./routeFetcher/osrmFallback.js";
+import { scoreRoutes, selectBestRoute } from "./routeSelector.js";
+import type { LatLng } from "./lib/polyline.js";
+import { encodeGooglePolyline } from "./lib/polyline.js";
+import { getSupabaseClient } from "./supabase/client.js";
+import { TruckRoutingService } from "./routing/TruckRoutingService.js";
+import { agentDebugLog } from "./agentDebugLog.js";
 
 const app = express();
 app.use(cors());
@@ -214,6 +215,21 @@ const requestSchema = z.object({
 
 app.post("/api/truck-route", async (req, res) => {
   try {
+    // #region agent log
+    {
+      const body = req.body;
+      agentDebugLog(
+        "server/index.ts:/api/truck-route",
+        "handler_enter",
+        {
+          vercel: !!process.env.VERCEL,
+          bodyType: body === null ? "null" : body === undefined ? "undefined" : typeof body,
+          bodyKeys: body && typeof body === "object" && !Array.isArray(body) ? Object.keys(body as object) : [],
+        },
+        "H3",
+      );
+    }
+    // #endregion
     const parsed = requestSchema.parse(req.body);
     const googleKey = process.env.GOOGLE_API_KEY || process.env.GOOGLE_MAPS_API_KEY;
     const overpassUrl = process.env.OVERPASS_URL || "https://overpass-api.de/api/interpreter";
@@ -416,9 +432,34 @@ app.post("/api/truck-route", async (req, res) => {
       return res.status(200).json({ ...response, saved: true, mapRouteId: routeRow.id, recommendationId: recoRow.id });
     }
 
+    // #region agent log
+    agentDebugLog(
+      "server/index.ts:/api/truck-route",
+      "handler_ok_before_json",
+      {
+        bestRouteId: (response as { bestRouteId?: string }).bestRouteId,
+        routeCount: Array.isArray((response as { routes?: unknown[] }).routes)
+          ? (response as { routes: unknown[] }).routes.length
+          : -1,
+      },
+      "H4",
+    );
+    // #endregion
     return res.status(200).json(response);
   } catch (e) {
     const message = e instanceof Error ? e.message : "Unknown error";
+    // #region agent log
+    agentDebugLog(
+      "server/index.ts:/api/truck-route",
+      "handler_catch",
+      {
+        errName: e instanceof Error ? e.name : "non-Error",
+        errMessage: message.slice(0, 500),
+        isZod: e instanceof Error && e.name === "ZodError",
+      },
+      "H5",
+    );
+    // #endregion
     return res.status(400).json({ error: message });
   }
 });

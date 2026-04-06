@@ -1,8 +1,8 @@
-import type { LatLng, NormalizedSection, NormalizedTruckRoute, RouteOptions, TruckVehicle } from "../types";
-import { fetchGoogleDirections } from "../../routeFetcher/googleDirections";
-import { fetchOsrmFallback } from "../../routeFetcher/osrmFallback";
-import { encodeGooglePolyline } from "../../lib/polyline";
-import { scoreRoutes, selectBestRoute } from "../../routeSelector";
+import type { LatLng, NormalizedSection, NormalizedTruckRoute, RouteOptions, TruckVehicle } from "../types.js";
+import { fetchGoogleDirections } from "../../routeFetcher/googleDirections.js";
+import { fetchOsrmFallback } from "../../routeFetcher/osrmFallback.js";
+import { encodeGooglePolyline } from "../../lib/polyline.js";
+import { scoreRoutes, selectBestRoute } from "../../routeSelector.js";
 
 export class GMapsProvider {
   async calculate(origin: LatLng, destination: LatLng, vehicle: TruckVehicle, opts: RouteOptions & { stops?: Array<LatLng & { label?: string }> }) {

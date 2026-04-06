@@ -1,7 +1,7 @@
-import type { LatLng, RouteOptions, TruckRoutingResult, TruckVehicle } from "./types";
-import { GMapsProvider } from "./providers/GMapsProvider";
-import { HEREProvider } from "./providers/HEREProvider";
-import { OSMProvider } from "./providers/OSMProvider";
+import type { LatLng, RouteOptions, TruckRoutingResult, TruckVehicle } from "./types.js";
+import { GMapsProvider } from "./providers/GMapsProvider.js";
+import { HEREProvider } from "./providers/HEREProvider.js";
+import { OSMProvider } from "./providers/OSMProvider.js";
 
 export class TruckRoutingService {
   private gmaps = new GMapsProvider();

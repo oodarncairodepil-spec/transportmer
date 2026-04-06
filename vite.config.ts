@@ -18,6 +18,15 @@ export default defineConfig(({ mode }) => ({
       overlay: false,
     },
   },
+  /** Same proxy as dev — without this, `vite preview` returns 404 for /api/* (no backend). */
+  preview: {
+    proxy: {
+      "/api": {
+        target: "http://localhost:8787",
+        changeOrigin: true,
+      },
+    },
+  },
   plugins: [react(), mode === "development" && componentTagger()].filter(Boolean),
   resolve: {
     alias: {

@@ -1,5 +1,5 @@
-import type { LatLng, NormalizedTruckRoute, TruckVehicle } from "../types";
-import { scoreRoutes } from "../../routeSelector";
+import type { LatLng, NormalizedTruckRoute, TruckVehicle } from "../types.js";
+import { scoreRoutes } from "../../routeSelector.js";
 
 export class OSMProvider {
   async enrichWithOsm(routes: Array<{ routeId: string; polyline: string; distanceMeters?: number; durationSeconds?: number }>, vehicle: TruckVehicle) {

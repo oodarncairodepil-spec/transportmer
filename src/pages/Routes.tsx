@@ -19,7 +19,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Dialog, DialogContent } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -557,7 +557,8 @@ export default function Routes() {
   return (
     <div className="space-y-6">
       <Dialog open={routeLoading}>
-        <DialogContent className="max-w-sm">
+        <DialogContent className="max-w-sm" aria-describedby={undefined}>
+          <DialogTitle className="sr-only">Finding truck-safe routes</DialogTitle>
           <div className="flex items-center gap-3">
             <Loader2 className="h-5 w-5 animate-spin" />
             <div>

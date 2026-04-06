@@ -1,4 +1,4 @@
-import type { LatLng } from "../lib/polyline";
+import type { LatLng } from "../lib/polyline.js";
 
 export type GoogleRoute = {
   routeId: string;

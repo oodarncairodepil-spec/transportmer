@@ -1,8 +1,8 @@
 import { LRUCache } from "lru-cache";
 
-import type { LatLng, NormalizedSection, NormalizedTruckRoute, RouteOptions, TruckVehicle } from "../types";
-import { decodeHereFlexiblePolyline } from "../hereFlexiblePolyline";
-import { encodeGooglePolyline } from "../../lib/polyline";
+import type { LatLng, NormalizedSection, NormalizedTruckRoute, RouteOptions, TruckVehicle } from "../types.js";
+import { decodeHereFlexiblePolyline } from "../hereFlexiblePolyline.js";
+import { encodeGooglePolyline } from "../../lib/polyline.js";
 
 type HereRouteResponse = {
   routes?: Array<{

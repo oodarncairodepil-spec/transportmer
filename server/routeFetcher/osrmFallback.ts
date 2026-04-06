@@ -1,5 +1,5 @@
-import type { LatLng } from "../lib/polyline";
-import { encodeGooglePolyline } from "../lib/polyline";
+import type { LatLng } from "../lib/polyline.js";
+import { encodeGooglePolyline } from "../lib/polyline.js";
 
 type OsrmResponse = {
   code: string;
